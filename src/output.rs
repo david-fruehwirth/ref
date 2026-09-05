@@ -338,6 +338,13 @@ impl HumanRenderable for CommandOutput {
             }
             Self::Clean { dry_run, repository_root_path, scan_root_path, eligible_files_scanned, reference_count, used_reference_count, unused_reference_count, unused_references, references_removed, .. } => {
                 writeln!(w, "Repository:\n  {}\n\nScan root:\n  {}\n\nFiles scanned: {eligible_files_scanned}\nReferences:    {reference_count}\nUsed:          {used_reference_count}\nUnused:        {unused_reference_count}", repository_root_path.display(), scan_root_path.display())?;
+                let project_root = repository_root_path.parent().unwrap_or(repository_root_path);
+                if scan_root_path != project_root {
+                    writeln!(w, "\nNote: files outside this directory were not considered.")?;
+                }
+                if *eligible_files_scanned == 0 {
+                    writeln!(w, "\nwarning: no eligible text files were found in the clean scope\nAll references would appear unused.")?;
+                }
                 if !unused_references.is_empty() { writeln!(w, "\n{}:", if *dry_run { "Would remove" } else { "Unused references" })?; for r in unused_references { writeln!(w, "\n  {}\n    {}", r.citation_key, r.title)?; } }
                 if *dry_run { writeln!(w, "\nDry run: no references were removed.")?; } else if !references_removed.is_empty() { writeln!(w, "Removed {} unused references.", references_removed.len())?; } else if *unused_reference_count > 0 { writeln!(w, "Cleanup cancelled. No references were removed.")?; } else { writeln!(w, "\nNothing to clean.")?; }
             }

@@ -866,7 +866,7 @@ fn clean_cmd(repo: &Repository, args: CleanArgs, format: OutputFormat) -> Result
         )
     }
     if !args.dry_run && !analysis.unused.is_empty() && !args.yes {
-        if format == OutputFormat::Json || !io::stdin().is_terminal() {
+        if format == OutputFormat::Json {
             bail!("confirmation required; use --yes in non-interactive mode")
         }
         print!("\nRemove these references? [y/N] ");
