@@ -6,13 +6,16 @@ use std::{fmt, str::FromStr};
 pub struct CitationKey(String);
 
 impl CitationKey {
+    /// Whether a byte may occur within a citation key.
+    pub fn is_valid_byte(byte: u8) -> bool {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')
+    }
+
     pub fn new(value: impl Into<String>) -> Result<Self> {
         let value = value.into();
         let valid = !matches!(value.as_str(), "" | "." | "..")
             && value.as_bytes()[0].is_ascii_alphanumeric()
-            && value
-                .bytes()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'));
+            && value.bytes().all(Self::is_valid_byte);
         if !valid {
             bail!("invalid citation key `{value}` (expected [A-Za-z0-9][A-Za-z0-9._-]*)");
         }

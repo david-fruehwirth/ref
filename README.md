@@ -59,6 +59,7 @@ Manual edits and copied reference directories are immediately visible. Commit `.
 | `ref edit KEY` | Edit YAML using `$VISUAL`, then `$EDITOR` |
 | `ref rename OLD NEW` | Safely rename the reference directory |
 | `ref remove KEY [--yes]` (`ref rm`) | Remove the entire reference |
+| `ref clean [PATH ...] [--dry-run] [--yes]` | Remove references unused in the current-directory scope |
 | `ref export [biblatex] [--output FILE]` | Produce deterministic UTF-8 BibLaTeX |
 | `ref import FILE` | Import a BibTeX/BibLaTeX bibliography without PDFs |
 | `ref doctor [--strict]` | Validate structure, metadata, DOI syntax, and duplicates |
@@ -139,6 +140,37 @@ individual entries are reported, and processing continues, so an import may part
 succeed (with a non-zero status). A malformed bibliography is parsed before any files
 are created and therefore does not partially mutate the repository. The source `.bib`
 file is never modified.
+
+## Removing unused references
+
+Preview cleanup before removing metadata or attached PDFs:
+
+```sh
+ref clean --dry-run
+ref clean                 # asks for confirmation
+ref clean --yes           # explicitly skip confirmation
+```
+
+`clean` is deliberately directory-aware. Although repository discovery searches
+upward for the nearest `.ref`, usage scanning starts at the invocation directory
+and proceeds only downward. Paths further restrict that scope and are resolved
+relative to the invocation directory:
+
+```sh
+cd chapters/eeg
+ref clean --dry-run
+ref clean -n sections/methods.tex notes.md
+```
+
+The summary makes a nested scope explicit because references used in parent or
+sibling directories are not considered. Citation-key occurrences are literal,
+case-sensitive, and token-bounded; comments and plain-text notes count as usage
+to favor retaining a reference. `.bib`, `.bibtex`, PDF, binary, `.ref`, and `.git`
+content is excluded. Common repository-root `.gitignore` and `.git/info/exclude`
+rules (literal paths/directories, `*.extension`, and negation) are respected;
+full Git glob syntax and nested ignore files are not currently interpreted. An
+unreadable or invalid UTF-8 candidate text file makes the scan incomplete and prevents all deletion.
+Use `--dry-run` before destructive cleanup, especially from a subdirectory.
 
 ## Design and limitations
 

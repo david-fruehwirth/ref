@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input};
 use r#ref::{
+    clean::{self, CleanAnalysis},
     export,
     import::{self, ImportResult},
     launch::{self, Editor, Environment, FileOpener},
@@ -83,6 +84,11 @@ enum Commands {
         #[arg(long, short)]
         yes: bool,
     },
+    /// Remove references unused within the current directory scope
+    #[command(
+        long_about = "Remove references unused within the current directory scope.\n\nThe repository is discovered by walking upward, but citation usage is searched only in the current directory and its descendants."
+    )]
+    Clean(CleanArgs),
     Export {
         #[arg(default_value = "biblatex")]
         format: String,
@@ -98,6 +104,17 @@ enum Commands {
         #[arg(long)]
         strict: bool,
     },
+}
+#[derive(Args)]
+struct CleanArgs {
+    /// Restrict scanning to files/directories below the current directory
+    paths: Vec<PathBuf>,
+    /// Show references that would be removed without modifying the repository
+    #[arg(long, short = 'n')]
+    dry_run: bool,
+    /// Remove unused references without confirmation
+    #[arg(long, short = 'y')]
+    yes: bool,
 }
 #[derive(Args)]
 struct AddArgs {
@@ -229,6 +246,7 @@ fn run() -> Result<u8> {
             println!("Renamed {old} → {new}\n\nNote: existing \\cite{{{old}}} references are not updated automatically.");
         }
         Commands::Remove { key, yes } => remove(&repo()?, key, yes)?,
+        Commands::Clean(args) => return clean_cmd(&repo()?, args),
         Commands::Export { format, output } => export_cmd(&repo()?, &format, output.as_deref())?,
         Commands::Import { file } => return import_cmd(&repo()?, &file),
         Commands::Doctor { strict } => return doctor(&repo()?, strict),
@@ -631,6 +649,112 @@ fn remove(repo: &Repository, key: String, yes: bool) -> Result<()> {
         println!("Removed {key}")
     }
     Ok(())
+}
+
+fn clean_cmd(repo: &Repository, args: CleanArgs) -> Result<u8> {
+    // Avoid an unnecessary project traversal for an empty collection.
+    if repo.load_all()?.is_empty() {
+        println!("Nothing to clean.");
+        return Ok(0);
+    }
+    let cwd = env::current_dir()?.canonicalize()?;
+    let analysis = clean::analyze(repo, &cwd, &args.paths)?;
+    print_clean_analysis(&analysis, args.dry_run);
+
+    if !analysis.scan_errors.is_empty() {
+        eprintln!("\nerror: clean scan incomplete\n\nCould not inspect:");
+        for error in &analysis.scan_errors {
+            eprintln!("  {}: {}", error.path.display(), error.message);
+        }
+        eprintln!("\nNo references were removed.");
+        return Ok(1);
+    }
+    if analysis.unused.is_empty() {
+        println!("\nNothing to clean.");
+        return Ok(0);
+    }
+    if args.dry_run {
+        println!("\nDry run: no references were removed.");
+        return Ok(0);
+    }
+    if analysis.files_scanned == 0 {
+        eprintln!("warning: no eligible text files were found in the clean scope\n\nAll references would appear unused.");
+    }
+    let project_root = repo.root().parent().unwrap_or(repo.root());
+    if analysis.scan_root != project_root {
+        eprintln!("warning: clean is scoped to the current directory\n\nRepository:\n  {}\n\nScan scope:\n  {}\n\nReferences used outside this directory are not considered.\n", project_root.display(), analysis.scan_root.display());
+    }
+    if !args.yes {
+        println!("\n{} unused references found.\n\nThis will remove the reference metadata and any attached PDFs.", analysis.unused.len());
+        print!("\nRemove these references? [y/N] ");
+        io::stdout().flush()?;
+        let mut response = String::new();
+        io::stdin().read_line(&mut response)?;
+        if !matches!(response.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+            println!("Cleanup cancelled. No references were removed.");
+            return Ok(0);
+        }
+    }
+    let mut removed = 0;
+    let mut failures = Vec::new();
+    for reference in &analysis.unused {
+        match repo.remove(&reference.key) {
+            Ok(()) => removed += 1,
+            Err(error) => failures.push((&reference.key, error)),
+        }
+    }
+    println!("Removed {removed} unused references.");
+    if failures.is_empty() {
+        return Ok(0);
+    }
+    eprintln!("\nFailed to remove:");
+    for (key, error) in failures {
+        eprintln!("  {key}: {error:#}");
+    }
+    Ok(1)
+}
+
+fn print_clean_analysis(analysis: &CleanAnalysis, dry_run: bool) {
+    println!(
+        "Repository:\n  {}\n\nScan root:\n  {}",
+        analysis.repository_root.display(),
+        analysis.scan_root.display()
+    );
+    if analysis.scan_root
+        != analysis
+            .repository_root
+            .parent()
+            .unwrap_or(&analysis.repository_root)
+    {
+        println!("\nNote: files outside this directory were not considered.");
+    }
+    println!(
+        "\nFiles scanned: {}\nReferences:    {}\nUsed:          {}\nUnused:        {}",
+        analysis.files_scanned,
+        analysis.used.len() + analysis.unused.len(),
+        analysis.used.len(),
+        analysis.unused.len()
+    );
+    if analysis.files_scanned == 0 {
+        println!("\nwarning: no eligible text files were found in the clean scope\nAll references would appear unused.");
+    }
+    if !analysis.unused.is_empty() {
+        println!(
+            "\n{}:",
+            if analysis.scan_errors.is_empty() {
+                if dry_run {
+                    "Would remove"
+                } else {
+                    "Unused references"
+                }
+            } else {
+                "Tentative unused references"
+            }
+        );
+        for reference in &analysis.unused {
+            println!("\n  {}\n    {}", reference.key, reference.metadata.title);
+        }
+    }
 }
 fn export_cmd(repo: &Repository, format: &str, output: Option<&Path>) -> Result<()> {
     if format != "biblatex" {
