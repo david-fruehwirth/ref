@@ -96,8 +96,11 @@ pub fn inspect(repo: &Repository) -> Result<DoctorReport> {
     repo.validate_structure()?;
     let mut report = DoctorReport::default();
     let mut dois: HashMap<String, Vec<CitationKey>> = HashMap::new();
-    for entry in fs::read_dir(repo.references_dir())? {
-        let entry = entry?;
+    // Filesystem iteration order is unspecified. Sort before validation so both
+    // structured diagnostics and human-readable doctor output are deterministic.
+    let mut entries = fs::read_dir(repo.references_dir())?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
         if !entry.file_type()?.is_dir() {
             continue;
         }
