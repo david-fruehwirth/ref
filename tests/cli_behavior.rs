@@ -108,13 +108,59 @@ fn help_and_version_expose_stable_command_surface() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("search"))
-        .stdout(predicate::str::contains("doctor"));
+        .stdout(predicate::str::contains(
+            "A Git-like, project-local reference manager",
+        ))
+        .stdout(predicate::str::contains("Add a bibliographic reference"))
+        .stdout(predicate::str::contains("Search references"))
+        .stdout(predicate::str::contains("Import references"))
+        .stdout(predicate::str::contains("Export references"))
+        .stdout(predicate::str::contains("Find and remove references"))
+        .stdout(predicate::str::contains("Check repository integrity"));
     support::command(temp.path())
         .arg("--version")
         .assert()
         .success()
         .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn core_subcommand_help_explains_options_and_safety_semantics() {
+    let temp = tempfile::tempdir().unwrap();
+
+    support::command(temp.path())
+        .args(["add", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--title"))
+        .stdout(predicate::str::contains("--author"))
+        .stdout(predicate::str::contains("--year"))
+        .stdout(predicate::str::contains("--no-pdf"))
+        .stdout(predicate::str::contains("Given names, Family name"));
+
+    support::command(temp.path())
+        .args(["clean", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--dry-run"))
+        .stdout(predicate::str::contains("current directory downward"))
+        .stdout(predicate::str::contains(
+            "incomplete scan prevents deletion",
+        ));
+
+    support::command(temp.path())
+        .args(["doctor", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--strict"))
+        .stdout(predicate::str::contains("Treat warnings as failures"));
+
+    support::command(temp.path())
+        .args(["import", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("PDFs are not imported"))
+        .stdout(predicate::str::contains("never overwritten"));
 }
 
 #[test]
