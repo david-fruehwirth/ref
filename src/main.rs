@@ -3,6 +3,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input};
 use r#ref::{
     export,
+    import::{self, ImportResult},
     launch::{self, Editor, Environment, FileOpener},
     model::{
         display_author, generated_key, validate_year, CitationKey, Person, Reference, ReferenceType,
@@ -86,6 +87,11 @@ enum Commands {
         format: String,
         #[arg(long, short)]
         output: Option<PathBuf>,
+    },
+    /// Import references from a BibTeX/BibLaTeX bibliography (PDFs are not imported)
+    Import {
+        /// BibTeX or BibLaTeX bibliography file
+        file: PathBuf,
     },
     Doctor {
         #[arg(long)]
@@ -221,9 +227,59 @@ fn run() -> Result<u8> {
         }
         Commands::Remove { key, yes } => remove(&repo()?, key, yes)?,
         Commands::Export { format, output } => export_cmd(&repo()?, &format, output.as_deref())?,
+        Commands::Import { file } => return import_cmd(&repo()?, &file),
         Commands::Doctor { strict } => return doctor(&repo()?, strict),
     };
     Ok(0)
+}
+
+fn import_cmd(repo: &Repository, path: &Path) -> Result<u8> {
+    if !path.is_file() {
+        bail!(
+            "bibliography `{}` does not exist or is not a regular file",
+            path.display()
+        );
+    }
+    let source =
+        fs::read_to_string(path).with_context(|| format!("failed to read `{}`", path.display()))?;
+    let entries = import::parse_bibliography(&source)
+        .with_context(|| format!("failed to parse `{}`", path.display()))?;
+    let result = import::import_bibliography(repo, entries);
+    print_import_diagnostics(&result);
+    if result.is_complete() {
+        println!(
+            "Imported {} references from {}",
+            result.imported,
+            path.display()
+        );
+    } else {
+        println!(
+            "Import complete with errors.\n\nEntries:  {}\nImported: {}\nSkipped:  {}\nFailed:   {}",
+            result.total,
+            result.imported,
+            result.skipped.len(),
+            result.failed.len()
+        );
+    }
+    Ok(u8::from(!result.is_complete()))
+}
+
+fn print_import_diagnostics(result: &ImportResult) {
+    for diagnostic in &result.skipped {
+        eprintln!(
+            "warning: skipped `{}`\n  {}",
+            diagnostic.key, diagnostic.message
+        );
+    }
+    for diagnostic in &result.failed {
+        eprintln!(
+            "warning: failed to import `{}`\n  {}",
+            diagnostic.key, diagnostic.message
+        );
+    }
+    for diagnostic in &result.warnings {
+        eprintln!("warning: `{}`: {}", diagnostic.key, diagnostic.message);
+    }
 }
 
 fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {

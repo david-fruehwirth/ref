@@ -60,6 +60,7 @@ Manual edits and copied reference directories are immediately visible. Commit `.
 | `ref rename OLD NEW` | Safely rename the reference directory |
 | `ref remove KEY [--yes]` (`ref rm`) | Remove the entire reference |
 | `ref export [biblatex] [--output FILE]` | Produce deterministic UTF-8 BibLaTeX |
+| `ref import FILE` | Import a BibTeX/BibLaTeX bibliography without PDFs |
 | `ref doctor [--strict]` | Validate structure, metadata, DOI syntax, and duplicates |
 
 Run `ref COMMAND --help` for flags. Non-interactive adds require `--title`; `--key` is optional.
@@ -90,8 +91,30 @@ Each repeatable `--author` uses `Given names, Family name`; `John,Doe` is also
 accepted. In a non-interactive invocation, the citation key is generated from the first
 author and year unless `--key` supplies it explicitly.
 
+## Importing an existing bibliography
+
+To migrate an existing LaTeX project, initialize a repository beside the document and
+import its bibliography:
+
+```sh
+cd existing-thesis                 # contains thesis.tex and references.bib
+ref init
+ref import references.bib
+```
+
+Bibliography citation keys are preserved, so existing `\cite{...}` commands continue
+to work. Each successful entry is stored using the normal repository format at
+`.ref/refs/<key>/ref.yaml`. PDF and attachment fields are intentionally ignored; import
+never copies or creates `paper.pdf`.
+
+Import never overwrites an existing key. Conflicting entries are skipped, invalid
+individual entries are reported, and processing continues, so an import may partially
+succeed (with a non-zero status). A malformed bibliography is parsed before any files
+are created and therefore does not partially mutate the repository. The source `.bib`
+file is never modified.
+
 ## Design and limitations
 
 Data safety, predictable behavior, readable YAML, and useful Git diffs take precedence over features. Writes use temporary paths and rename. Collection operations scan metadata, which is intentionally appropriate for thesis-sized libraries.
 
-The MVP has no GUI, cloud sync, database, metadata lookup, import, annotation handling, full-text indexing, citation insertion, or global library. It supports one optional PDF and one BibLaTeX exporter per reference.
+The MVP has no GUI, cloud sync, database, metadata lookup, attachment import, annotation handling, full-text indexing, citation insertion, or global library. It supports one optional PDF, local BibTeX/BibLaTeX metadata import, and one BibLaTeX exporter per reference. Cross-reference inheritance, editors, and unsupported fields are not imported; unknown entry types fall back to `misc`.
