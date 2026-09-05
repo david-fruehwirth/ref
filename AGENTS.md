@@ -72,6 +72,20 @@ Ordinary Rust structs, enums, modules, filesystem operations, and deterministic
 transformations are usually enough. Do not add infrastructure because it is
 fashionable. Optimize only when measurements demonstrate a user-visible problem.
 
+### Conservative cleanup scope
+
+`ref clean` is deliberately asymmetric: repository discovery walks upward, while
+usage discovery walks downward from the invocation directory. Never substitute
+the repository root for that explicit scan root. Optional clean paths may only
+narrow the downward scope and may not escape it.
+
+Cleanup prefers false positives over false negatives. A token-bounded textual
+citation-key occurrence, including one in a comment or note, keeps a reference:
+preserving an unused reference is safer than deleting a used one. Derived
+bibliographies such as `references.bib` must not count as citation usage, nor may
+`.ref`, `.git`, PDFs, binary files, or files excluded by the supported Git ignore
+rules. An incomplete scan must prevent destructive cleanup.
+
 ## The Git Analogy
 
 `ref` borrows its mental model from Git more than from desktop reference managers.
