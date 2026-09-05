@@ -33,7 +33,7 @@ fn citation_keys_accept_safe_components_and_reject_traversal() {
 }
 
 #[test]
-fn public_formatting_and_key_generation_cover_author_shapes() {
+fn public_formatting_covers_author_shapes() {
     let people = [
         Person {
             given: "A".into(),
@@ -52,8 +52,71 @@ fn public_formatting_and_key_generation_cover_author_shapes() {
     assert_eq!(display_author(&people[..1]), "Vaswani");
     assert_eq!(display_author(&people[..2]), "Vaswani & Shazeer");
     assert_eq!(display_author(&people), "Vaswani et al.");
-    assert_eq!(generated_key(" Smith, Jr. ", Some(2024)), "smithjr2024");
-    assert_eq!(generated_key("李", None), "reference");
+}
+
+#[test]
+fn generated_keys_normalize_author_year_and_title() {
+    let cases = [
+        (
+            "Rocchio",
+            "Relevance Feedback in Information Retrieval",
+            "Rocchio1971RelevanceFeedback",
+        ),
+        (
+            "van der Waals",
+            "Molecular Interaction Models",
+            "VanDerWaals1971MolecularInteraction",
+        ),
+        ("Müller", "Neural Signal Analysis", "Muller1971NeuralSignal"),
+        (
+            "García Márquez",
+            "Computational Language Models",
+            "GarciaMarquez1971ComputationalLanguage",
+        ),
+        (
+            "O'Connor",
+            "EEG Attention Measurement",
+            "OConnor1971EEGAttention",
+        ),
+        (
+            "Smith-Jones",
+            "attention mechanisms in transformers",
+            "SmithJones1971AttentionMechanisms",
+        ),
+        (
+            "Smith",
+            "Attention mechanisms in transformers",
+            "Smith1971AttentionMechanisms",
+        ),
+        (
+            "Smith",
+            "Using EEG for Attention Detection",
+            "Smith1971UsingEEG",
+        ),
+        ("Smith", "Attention", "Smith1971Attention"),
+    ];
+    for (family, title, expected) in cases {
+        let reference = support::sample(title, family, Some(1971));
+        let key = generated_key(&reference).unwrap();
+        assert_eq!(key.as_str(), expected);
+        assert!(CitationKey::new(key.as_str()).is_ok());
+    }
+}
+
+#[test]
+fn generated_keys_require_author_and_year_but_explicit_keys_remain_valid() {
+    let mut reference = support::sample("Example Paper", "Smith", None);
+    assert!(generated_key(&reference)
+        .unwrap_err()
+        .to_string()
+        .contains("publication year"));
+    reference.year = Some(2024);
+    reference.authors.clear();
+    assert!(generated_key(&reference)
+        .unwrap_err()
+        .to_string()
+        .contains("without an author"));
+    assert!(CitationKey::new("custom").is_ok());
 }
 
 #[test]

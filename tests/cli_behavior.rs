@@ -36,12 +36,19 @@ fn add_from_doi_uses_normal_no_pdf_persistence_and_detects_duplicates() {
         .args(["add", "--doi", "DOI: 10.1234/EXAMPLE"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Added doe2024"))
+        .stdout(predicate::str::contains("Added Doe2024ExampleArticle"))
         .stderr(predicate::str::contains("Retrieving metadata"));
     handle.join().unwrap();
-    assert!(temp.path().join(".ref/refs/doe2024/ref.yaml").is_file());
-    assert!(!temp.path().join(".ref/refs/doe2024/paper.pdf").exists());
-    let yaml = fs::read_to_string(temp.path().join(".ref/refs/doe2024/ref.yaml")).unwrap();
+    assert!(temp
+        .path()
+        .join(".ref/refs/Doe2024ExampleArticle/ref.yaml")
+        .is_file());
+    assert!(!temp
+        .path()
+        .join(".ref/refs/Doe2024ExampleArticle/paper.pdf")
+        .exists());
+    let yaml =
+        fs::read_to_string(temp.path().join(".ref/refs/Doe2024ExampleArticle/ref.yaml")).unwrap();
     assert!(yaml.contains("doi: 10.1234/example"));
     support::command(temp.path())
         .args(["doctor", "--strict"])
@@ -51,7 +58,9 @@ fn add_from_doi_uses_normal_no_pdf_persistence_and_detects_duplicates() {
         .args(["add", "--doi", "https://doi.org/10.1234/example"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("already stored as `doe2024`"));
+        .stderr(predicate::str::contains(
+            "already stored as `Doe2024ExampleArticle`",
+        ));
 }
 
 #[test]
@@ -379,10 +388,10 @@ fn add_accepts_cli_metadata_attaches_pdf_and_generates_key() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Added doe2024"));
+        .stdout(predicate::str::contains("Added Doe2024ExamplePaper"));
     let stored = r#ref::repository::Repository::discover(temp.path())
         .unwrap()
-        .load_reference(&r#ref::model::CitationKey::new("doe2024").unwrap())
+        .load_reference(&r#ref::model::CitationKey::new("Doe2024ExamplePaper").unwrap())
         .unwrap();
     assert_eq!(stored.metadata.title, "Example Paper");
     assert_eq!(stored.metadata.year, Some(2024));
@@ -424,8 +433,11 @@ fn add_without_pdf_uses_metadata_and_rejects_bad_inputs_and_conflicts() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Added doe2024"));
-    assert!(!temp.path().join(".ref/refs/doe2024/paper.pdf").exists());
+        .stdout(predicate::str::contains("Added Doe2024Example"));
+    assert!(!temp
+        .path()
+        .join(".ref/refs/Doe2024Example/paper.pdf")
+        .exists());
 
     for author in ["John Doe", "John,", ",Doe"] {
         support::command(temp.path())
@@ -448,4 +460,69 @@ fn add_without_pdf_uses_metadata_and_rejects_bad_inputs_and_conflicts() {
         .failure()
         .stderr(predicate::str::contains("cannot be used with"));
     assert!(!temp.path().join(".ref/refs/bad").exists());
+}
+
+#[test]
+fn generated_add_keys_handle_normalization_collisions_and_explicit_override() {
+    let temp = tempfile::tempdir().unwrap();
+    support::command(temp.path()).arg("init").assert().success();
+    let args = [
+        "add",
+        "--no-pdf",
+        "--title",
+        "Molecular Interaction Models",
+        "--author",
+        "Johannes, van der Waals",
+        "--year",
+        "2024",
+    ];
+    support::command(temp.path())
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Added VanDerWaals2024MolecularInteraction",
+        ));
+    support::command(temp.path())
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Added VanDerWaals2024MolecularInteractionA",
+        ));
+    support::command(temp.path())
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Added VanDerWaals2024MolecularInteractionB",
+        ));
+
+    support::command(temp.path())
+        .args([
+            "add",
+            "--no-pdf",
+            "--key",
+            "myKey",
+            "--title",
+            "Example Paper",
+            "--year",
+            "2024",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Added myKey"));
+    support::command(temp.path())
+        .args([
+            "add",
+            "--no-pdf",
+            "--title",
+            "Example Paper",
+            "--author",
+            "Jane, Smith",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("provide `--year`"))
+        .stderr(predicate::str::contains("`--key`"));
 }

@@ -107,6 +107,7 @@ struct AddArgs {
     /// Create a reference without an attached PDF
     #[arg(long, conflicts_with = "pdf")]
     no_pdf: bool,
+    /// Citation key (defaults to first-author family name, year, and title)
     #[arg(long)]
     key: Option<String>,
     /// Publication title
@@ -411,27 +412,39 @@ fn add_reference(
     interactive: bool,
 ) -> Result<CitationKey> {
     metadata.validate()?;
-    let base = generated_key(
-        metadata.authors.first().map_or("reference", |x| &x.family),
-        metadata.year,
-    );
-    let mut proposed = base.clone();
-    let mut suffix = b'a';
-    while repo.contains(&CitationKey::new(&proposed)?) {
-        proposed = format!("{base}{}", suffix as char);
-        suffix += 1;
-    }
     let key = match supplied_key {
         Some(key) => key,
-        None if interactive => Input::new()
-            .with_prompt("Citation key")
-            .default(proposed)
-            .interact_text()?,
-        None => proposed,
+        None => {
+            let base = generated_key(&metadata)?.to_string();
+            let mut proposed = base.clone();
+            let mut collision = 0;
+            while repo.contains(&CitationKey::new(&proposed)?) {
+                collision += 1;
+                proposed = format!("{base}{}", alphabetical_suffix(collision));
+            }
+            if interactive {
+                Input::new()
+                    .with_prompt("Citation key")
+                    .default(proposed)
+                    .interact_text()?
+            } else {
+                proposed
+            }
+        }
     };
     let key = CitationKey::new(key)?;
     repo.add(&key, &metadata, pdf)?;
     Ok(key)
+}
+
+fn alphabetical_suffix(mut number: usize) -> String {
+    let mut suffix = String::new();
+    while number > 0 {
+        number -= 1;
+        suffix.insert(0, (b'A' + (number % 26) as u8) as char);
+        number /= 26;
+    }
+    suffix
 }
 
 fn table(items: &[StoredReference]) {

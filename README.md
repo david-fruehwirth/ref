@@ -91,8 +91,26 @@ ref add --doi 10.1038/nrd842
 ```
 
 Each repeatable `--author` uses `Given names, Family name`; `John,Doe` is also
-accepted. In a non-interactive invocation, the citation key is generated from the first
-author and year unless `--key` supplies it explicitly.
+accepted.
+
+### Citation keys
+
+When no explicit `--key` is supplied, `ref` generates a key once, when the
+reference is created, from the first author's complete family name, publication
+year, and up to two title words. It selects the first two words that begin with
+capital letters, falling back to the first two words when fewer than two are
+capitalized. For example, Joseph J. Rocchio, 1971, *Relevance Feedback in
+Information Retrieval* becomes `Rocchio1971RelevanceFeedback`.
+
+Generated components are portable ASCII: multi-part names become PascalCase,
+common Latin diacritics are transliterated, punctuation is removed, and uppercase
+acronyms such as `EEG` are retained. A year and first author are required for
+automatic generation; references lacking either can still use an explicit key.
+Collisions receive uppercase alphabetic suffixes (`...`, `...A`, `...B`).
+
+This convention is not a validity requirement. Explicit keys and bibliography
+keys supplied to `ref import` are preserved exactly, and existing keys are never
+regenerated when metadata is edited. Identity changes only through `ref rename`.
 
 DOI lookup requires network access and a `curl` executable, and creates a reference
 without a managed PDF.
