@@ -1,7 +1,93 @@
 mod support;
 
 use predicates::prelude::*;
-use std::fs;
+use std::{
+    fs,
+    io::{Read, Write},
+    net::TcpListener,
+    thread,
+};
+
+fn doi_server(status: &str, body: &str) -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let status = status.to_owned();
+    let body = body.to_owned();
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0; 4096];
+        let size = stream.read(&mut request).unwrap();
+        assert!(String::from_utf8_lossy(&request[..size])
+            .to_ascii_lowercase()
+            .contains("accept: application/vnd.citationstyles.csl+json"));
+        write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/vnd.citationstyles.csl+json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    (url, handle)
+}
+
+#[test]
+fn add_from_doi_uses_normal_no_pdf_persistence_and_detects_duplicates() {
+    let temp = tempfile::tempdir().unwrap();
+    support::command(temp.path()).arg("init").assert().success();
+    let fixture = r#"{"type":"article-journal","title":"Example Article","author":[{"given":"Jane","family":"Doe"}],"container-title":"Journal of Examples","DOI":"10.1234/EXAMPLE","issued":{"date-parts":[[2024,5,10]]}}"#;
+    let (resolver, handle) = doi_server("200 OK", fixture);
+    support::command(temp.path())
+        .env("REF_DOI_RESOLVER", resolver)
+        .args(["add", "--doi", "DOI: 10.1234/EXAMPLE"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Added doe2024"))
+        .stderr(predicate::str::contains("Retrieving metadata"));
+    handle.join().unwrap();
+    assert!(temp.path().join(".ref/refs/doe2024/ref.yaml").is_file());
+    assert!(!temp.path().join(".ref/refs/doe2024/paper.pdf").exists());
+    let yaml = fs::read_to_string(temp.path().join(".ref/refs/doe2024/ref.yaml")).unwrap();
+    assert!(yaml.contains("doi: 10.1234/example"));
+    support::command(temp.path())
+        .args(["doctor", "--strict"])
+        .assert()
+        .success();
+    support::command(temp.path())
+        .args(["add", "--doi", "https://doi.org/10.1234/example"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already stored as `doe2024`"));
+}
+
+#[test]
+fn failed_doi_adds_do_not_mutate_the_repository() {
+    let temp = tempfile::tempdir().unwrap();
+    support::command(temp.path()).arg("init").assert().success();
+    support::command(temp.path())
+        .args(["add", "--doi", "invalid"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid DOI"));
+    let (resolver, handle) = doi_server("500 Internal Server Error", "");
+    support::command(temp.path())
+        .env("REF_DOI_RESOLVER", resolver)
+        .args(["add", "--doi", "10.1234/failure"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("failed temporarily"));
+    handle.join().unwrap();
+    assert_eq!(
+        fs::read_dir(temp.path().join(".ref/refs")).unwrap().count(),
+        0
+    );
+}
+
+#[test]
+fn add_rejects_a_pdf_and_doi_as_competing_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    support::command(temp.path()).arg("init").assert().success();
+    fs::write(temp.path().join("paper.pdf"), b"%PDF").unwrap();
+    support::command(temp.path())
+        .args(["add", "paper.pdf", "--doi", "10.1234/example"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
 
 #[test]
 fn help_and_version_expose_stable_command_surface() {
