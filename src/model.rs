@@ -120,19 +120,143 @@ pub fn validate_year(year: u16) -> Result<()> {
     Ok(())
 }
 
-pub fn generated_key(family: &str, year: Option<u16>) -> String {
-    let mut key: String = family
-        .to_lowercase()
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
+/// Generate the creation-time default identity for a reference.
+///
+/// This is deliberately separate from [`CitationKey`] validation: imported,
+/// explicit, and existing keys need not follow this naming convention.
+pub fn generated_key(reference: &Reference) -> Result<CitationKey> {
+    let author = reference.authors.first().ok_or_else(|| {
+        anyhow::anyhow!(
+            "cannot generate a citation key without an author\n\
+             hint: provide an author or specify a citation key with `--key`"
+        )
+    })?;
+    let year = reference.year.ok_or_else(|| {
+        anyhow::anyhow!(
+            "cannot generate a citation key without a publication year\n\
+             hint: provide `--year` or specify a citation key with `--key`"
+        )
+    })?;
+
+    let author_component: String = author
+        .family
+        .split_whitespace()
+        .map(normalize_name_part)
         .collect();
-    if key.is_empty() {
-        key.push_str("reference");
+    if author_component.is_empty() {
+        bail!("cannot generate a citation key from the first author's family name\nhint: specify a citation key with `--key`");
     }
-    if let Some(year) = year {
-        key.push_str(&year.to_string());
+
+    let words: Vec<&str> = reference
+        .title
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let capitals: Vec<&str> = words
+        .iter()
+        .copied()
+        .filter(|word| {
+            word.chars()
+                .find(|c| c.is_alphabetic())
+                .is_some_and(char::is_uppercase)
+        })
+        .collect();
+    let selected = if capitals.len() >= 2 {
+        &capitals
+    } else {
+        &words
+    };
+    let title_component: String = selected
+        .iter()
+        .take(2)
+        .map(|word| normalize_title_word(word))
+        .collect();
+    if title_component.is_empty() {
+        bail!("cannot generate a citation key because the title contains no usable words\nhint: specify a citation key with `--key`");
     }
-    key
+
+    CitationKey::new(format!("{author_component}{year}{title_component}"))
+}
+
+fn normalize_name_part(value: &str) -> String {
+    let ascii = transliterate_latin(value);
+    let filtered: String = ascii.chars().filter(char::is_ascii_alphanumeric).collect();
+    let uniformly_cased = filtered
+        .chars()
+        .filter(|c| c.is_ascii_alphabetic())
+        .all(char::is_uppercase)
+        || filtered
+            .chars()
+            .filter(|c| c.is_ascii_alphabetic())
+            .all(char::is_lowercase);
+    capitalize_ascii(if uniformly_cased {
+        filtered.to_ascii_lowercase()
+    } else {
+        filtered
+    })
+}
+
+fn normalize_title_word(value: &str) -> String {
+    let filtered: String = transliterate_latin(value)
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect();
+    capitalize_ascii(filtered)
+}
+
+fn capitalize_ascii(mut value: String) -> String {
+    if let Some(first) = value.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    value
+}
+
+// Deterministic Latin transliteration for the common diacritics encountered in
+// bibliographic names and titles. Characters without a useful ASCII equivalent
+// are discarded by component normalization.
+fn transliterate_latin(value: &str) -> String {
+    value.chars().fold(String::new(), |mut output, c| {
+        let replacement = match c {
+            'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'Ā' | 'Ă' | 'Ą' => "A",
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' => "a",
+            'Ç' | 'Ć' | 'Ĉ' | 'Ċ' | 'Č' => "C",
+            'ç' | 'ć' | 'ĉ' | 'ċ' | 'č' => "c",
+            'Ď' | 'Đ' => "D",
+            'ď' | 'đ' => "d",
+            'È' | 'É' | 'Ê' | 'Ë' | 'Ē' | 'Ĕ' | 'Ė' | 'Ę' | 'Ě' => "E",
+            'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' => "e",
+            'Ì' | 'Í' | 'Î' | 'Ï' | 'Ĩ' | 'Ī' | 'Ĭ' | 'Į' => "I",
+            'ì' | 'í' | 'î' | 'ï' | 'ĩ' | 'ī' | 'ĭ' | 'į' => "i",
+            'Ñ' | 'Ń' | 'Ņ' | 'Ň' => "N",
+            'ñ' | 'ń' | 'ņ' | 'ň' => "n",
+            'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' | 'Ø' | 'Ō' | 'Ŏ' | 'Ő' => "O",
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' | 'ŏ' | 'ő' => "o",
+            'Ř' | 'Ŕ' | 'Ŗ' => "R",
+            'ř' | 'ŕ' | 'ŗ' => "r",
+            'Ś' | 'Ŝ' | 'Ş' | 'Š' => "S",
+            'ś' | 'ŝ' | 'ş' | 'š' => "s",
+            'Ť' | 'Ţ' => "T",
+            'ť' | 'ţ' => "t",
+            'Ù' | 'Ú' | 'Û' | 'Ü' | 'Ũ' | 'Ū' | 'Ŭ' | 'Ů' | 'Ű' | 'Ų' => "U",
+            'ù' | 'ú' | 'û' | 'ü' | 'ũ' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' => "u",
+            'Ý' | 'Ÿ' => "Y",
+            'ý' | 'ÿ' => "y",
+            'Ź' | 'Ż' | 'Ž' => "Z",
+            'ź' | 'ż' | 'ž' => "z",
+            'Æ' => "AE",
+            'æ' => "ae",
+            'Œ' => "OE",
+            'œ' => "oe",
+            'ß' => "ss",
+            _ => "",
+        };
+        if c.is_ascii() {
+            output.push(c);
+        } else {
+            output.push_str(replacement);
+        }
+        output
+    })
 }
 
 pub fn display_author(authors: &[Person]) -> String {
@@ -158,8 +282,28 @@ mod tests {
     }
     #[test]
     fn generation() {
-        assert_eq!(generated_key("Rocchio", Some(1971)), "rocchio1971");
-        assert_eq!(generated_key("García-López", None), "garcalpez");
+        let reference = Reference {
+            entry_type: ReferenceType::Article,
+            title: "Relevance Feedback in Information Retrieval".into(),
+            authors: vec![Person {
+                given: "Joseph".into(),
+                family: "Rocchio".into(),
+            }],
+            year: Some(1971),
+            container_title: None,
+            publisher: None,
+            volume: None,
+            issue: None,
+            pages: None,
+            doi: None,
+            url: None,
+            tags: vec![],
+            notes: None,
+        };
+        assert_eq!(
+            generated_key(&reference).unwrap().as_str(),
+            "Rocchio1971RelevanceFeedback"
+        );
     }
     #[test]
     fn unknown_type() {

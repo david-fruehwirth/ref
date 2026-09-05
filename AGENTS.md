@@ -215,6 +215,15 @@ Citation keys MUST not allow path traversal. Convert untrusted identity through
 `foo\bar` must not escape `.ref/refs/`. Treat paths as hostile input at boundaries
 and use `Path`/`PathBuf`, not hard-coded separators.
 
+For newly added references without an explicit key, generate the creation-time
+default from the first author's normalized full family name, publication year,
+and selected title words (the first two capitalized words, falling back to the
+first two words when fewer than two are capitalized). Generated keys use portable
+ASCII and uppercase alphabetic collision suffixes. **The generated-key convention
+is not a citation-key validity requirement.** Imported and explicitly supplied
+keys are preserved, and an existing key is stable identity: editing metadata must
+never regenerate it. Only an explicit rename changes that identity.
+
 ## Metadata Model
 
 YAML is the persistence representation; typed domain structs are the application
