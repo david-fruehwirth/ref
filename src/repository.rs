@@ -137,7 +137,12 @@ impl Repository {
             fs::copy(pdf, tmp.path().join("paper.pdf"))?;
         }
         let temp_path = tmp.keep();
-        fs::rename(&temp_path, self.reference_path(key)).context("failed to commit reference")?;
+        if let Err(error) = fs::rename(&temp_path, self.reference_path(key)) {
+            // `TempDir::keep` transfers cleanup responsibility to us. Never leave
+            // an import/add staging directory behind after a failed atomic commit.
+            let _ = fs::remove_dir_all(&temp_path);
+            return Err(error).context("failed to commit reference");
+        }
         Ok(())
     }
 
@@ -177,5 +182,36 @@ mod tests {
     fn discovery_fails() {
         let t = tempfile::tempdir().unwrap();
         assert!(Repository::discover(t.path()).is_err());
+    }
+
+    #[test]
+    fn failed_commit_removes_staging_directory() {
+        let t = tempfile::tempdir().unwrap();
+        let repo = Repository::init(t.path()).unwrap();
+        let key = CitationKey::new("blocked").unwrap();
+        fs::write(repo.reference_path(&key), "not a directory").unwrap();
+        let metadata = Reference {
+            entry_type: crate::model::ReferenceType::Misc,
+            title: "Example".into(),
+            authors: vec![],
+            year: None,
+            container_title: None,
+            publisher: None,
+            volume: None,
+            issue: None,
+            pages: None,
+            doi: None,
+            url: None,
+            tags: vec![],
+            notes: None,
+        };
+        assert!(repo.add(&key, &metadata, None).is_err());
+        assert!(fs::read_dir(repo.references_dir())
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".ref-add-")));
     }
 }
