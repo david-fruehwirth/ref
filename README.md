@@ -56,13 +56,14 @@ Manual edits and copied reference directories are immediately visible. Commit `.
 | `ref search QUERY [--key|--author|--title|--year|--tag]` | Search metadata |
 | `ref show KEY` | Show one exact key |
 | `ref open KEY` | Open its PDF with the native viewer |
+| `ref attach KEY PDF` | Safely attach a source PDF to an existing reference |
 | `ref edit KEY` | Edit YAML using `$VISUAL`, then `$EDITOR` |
 | `ref rename OLD NEW` | Safely rename the reference directory |
 | `ref remove KEY [--yes]` (`ref rm`) | Remove the entire reference |
 | `ref clean [PATH ...] [--dry-run] [--yes]` | Remove references unused in the current-directory scope |
 | `ref export [biblatex] [--output FILE]` | Produce deterministic UTF-8 BibLaTeX |
 | `ref import FILE` | Import a BibTeX/BibLaTeX bibliography without PDFs |
-| `ref doctor [--strict]` | Validate structure, metadata, DOI syntax, and duplicates |
+| `ref doctor [--strict]` | Validate structure, metadata, source availability, DOI syntax, and duplicates |
 
 Run `ref COMMAND --help` for flags. Non-interactive adds require `--title`; `--key` is optional.
 
@@ -140,6 +141,36 @@ individual entries are reported, and processing continues, so an import may part
 succeed (with a non-zero status). A malformed bibliography is parsed before any files
 are created and therefore does not partially mutate the repository. The source `.bib`
 file is never modified.
+
+## Checking source availability
+
+Bibliographic metadata and locally available source material are separate concerns.
+Run `ref doctor` to check both repository integrity and whether every reference has
+the canonical, non-empty `.ref/refs/<key>/paper.pdf` source artifact:
+
+```sh
+ref doctor
+```
+
+A missing source PDF is a warning, so references created by `ref import`,
+`ref add --no-pdf`, or DOI lookup remain valid, searchable, and exportable. Attach a
+PDF later without changing or removing the source file:
+
+```sh
+ref attach <key> ~/Downloads/paper.pdf
+```
+
+The command never overwrites an existing `paper.pdf`. A zero-byte or non-file
+canonical attachment is an integrity error.
+
+Use `ref doctor --strict` as a thesis CI or final-submission quality gate. Strict
+mode exits unsuccessfully for missing source PDFs, as it does for all warnings.
+
+This is a repository-completeness heuristic, not formal provenance. A PDF's
+presence shows only that a source artifact is locally available; it does not show
+that the correct work was attached, read, interpreted correctly, or supports a
+particular claim. Future formats may support other evidence types, but the current
+convention recognizes only `paper.pdf`.
 
 ## Removing unused references
 

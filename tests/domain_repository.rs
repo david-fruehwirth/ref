@@ -1,6 +1,7 @@
 mod support;
 
 use r#ref::{
+    doctor::{self, DiagnosticSeverity, DoctorDiagnostic},
     model::{display_author, generated_key, CitationKey, Person, Reference, ReferenceType},
     repository::Repository,
 };
@@ -188,6 +189,74 @@ fn repository_loads_manual_edits_and_derives_identity_from_directory() {
     );
     assert!(!loaded[0].has_pdf);
     assert!(loaded[1].has_pdf);
+}
+
+#[test]
+fn doctor_structures_source_proof_diagnostics_and_counts() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = Repository::init(temp.path()).unwrap();
+    for key in ["RefA", "RefB", "RefC", "RefD"] {
+        support::add(&repo, key, &support::sample(key, "Smith", Some(2024)));
+    }
+    for key in ["RefA", "RefC"] {
+        fs::write(
+            repo.reference_path(&CitationKey::new(key).unwrap())
+                .join("paper.pdf"),
+            b"deterministic source bytes",
+        )
+        .unwrap();
+    }
+    fs::write(
+        repo.reference_path(&CitationKey::new("RefB").unwrap())
+            .join("source.pdf"),
+        b"wrong name",
+    )
+    .unwrap();
+
+    let report = doctor::inspect(&repo).unwrap();
+    assert_eq!(report.references_total, 4);
+    assert_eq!(report.references_with_source_pdf, 2);
+    assert_eq!(report.references_without_source_pdf, 2);
+    let missing = report
+        .diagnostics
+        .iter()
+        .filter_map(|diagnostic| match diagnostic {
+            DoctorDiagnostic::MissingSourcePdf { key } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(missing, ["RefB", "RefD"]);
+    assert!(report.diagnostics.iter().all(|diagnostic| {
+        !matches!(diagnostic, DoctorDiagnostic::MissingSourcePdf { .. })
+            || diagnostic.severity() == DiagnosticSeverity::Warning
+    }));
+}
+
+#[test]
+fn doctor_rejects_empty_and_non_file_source_proof() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = Repository::init(temp.path()).unwrap();
+    for key in ["empty", "directory"] {
+        support::add(&repo, key, &support::sample(key, "Smith", Some(2024)));
+    }
+    fs::write(
+        repo.reference_path(&CitationKey::new("empty").unwrap())
+            .join("paper.pdf"),
+        [],
+    )
+    .unwrap();
+    fs::create_dir(
+        repo.reference_path(&CitationKey::new("directory").unwrap())
+            .join("paper.pdf"),
+    )
+    .unwrap();
+    let report = doctor::inspect(&repo).unwrap();
+    assert_eq!(report.references_with_source_pdf, 0);
+    assert_eq!(report.error_count(), 2);
+    assert!(report.diagnostics.iter().all(|diagnostic| {
+        !matches!(diagnostic, DoctorDiagnostic::InvalidSourcePdf { .. })
+            || diagnostic.severity() == DiagnosticSeverity::Error
+    }));
 }
 
 #[test]

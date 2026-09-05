@@ -3,6 +3,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input};
 use r#ref::{
     clean::{self, CleanAnalysis},
+    doctor::{self, DiagnosticSeverity},
     export,
     import::{self, ImportResult},
     launch::{self, Editor, Environment, FileOpener},
@@ -13,7 +14,6 @@ use r#ref::{
     repository::{Repository, StoredReference},
 };
 use std::{
-    collections::HashMap,
     env, fs,
     io::{self, IsTerminal, Write},
     path::{Path, PathBuf},
@@ -70,6 +70,11 @@ enum Commands {
     },
     Open {
         key: String,
+    },
+    /// Attach a source PDF to an existing reference
+    Attach {
+        key: String,
+        pdf: PathBuf,
     },
     Edit {
         key: String,
@@ -238,6 +243,11 @@ fn run() -> Result<u8> {
         Commands::Search(a) => search(&repo()?, a)?,
         Commands::Show { key } => show(&repo()?.load_reference(&CitationKey::new(key)?)?),
         Commands::Open { key } => open_pdf(&repo()?, key)?,
+        Commands::Attach { key, pdf } => {
+            let key = CitationKey::new(key)?;
+            repo()?.attach(&key, &pdf)?;
+            println!("Attached source PDF to {key}");
+        }
         Commands::Edit { key } => edit(&repo()?, key)?,
         Commands::Rename { old_key, new_key } => {
             let old = CitationKey::new(old_key)?;
@@ -773,88 +783,35 @@ fn export_cmd(repo: &Repository, format: &str, output: Option<&Path>) -> Result<
 }
 
 fn doctor(repo: &Repository, strict: bool) -> Result<u8> {
-    repo.validate_structure()?;
-    let mut warnings = Vec::new();
-    let mut errors = Vec::new();
-    let mut parsed = 0;
-    let mut pdfs = 0;
-    let mut count = 0;
-    let mut dois: HashMap<String, Vec<String>> = HashMap::new();
-    for entry in fs::read_dir(repo.references_dir())? {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        count += 1;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if CitationKey::new(&name).is_err() {
-            errors.push(format!("{name}: invalid citation key"));
-            continue;
-        }
-        let yaml = entry.path().join("ref.yaml");
-        if !yaml.is_file() {
-            errors.push(format!("{name}: ref.yaml missing"));
-            continue;
-        }
-        let text = match fs::read_to_string(&yaml) {
-            Ok(x) => x,
-            Err(e) => {
-                errors.push(format!("{name}: cannot read metadata: {e}"));
-                continue;
-            }
-        };
-        let metadata: Reference = match serde_yaml::from_str(&text) {
-            Ok(x) => x,
-            Err(e) => {
-                errors.push(format!("{name}: invalid metadata: {e}"));
-                continue;
-            }
-        };
-        parsed += 1;
-        if let Err(e) = metadata.validate() {
-            errors.push(format!("{name}: invalid metadata: {e}"))
-        }
-        if metadata.year.is_none() {
-            warnings.push(format!("{name}: year missing"))
-        }
-        if metadata.authors.is_empty() {
-            warnings.push(format!("{name}: authors missing"))
-        }
-        if let Some(doi) = metadata.doi {
-            match doi.parse::<Doi>() {
-                Ok(doi) => dois.entry(doi.to_string()).or_default().push(name.clone()),
-                Err(_) => errors.push(format!("{name}: malformed DOI")),
-            }
-        }
-        let pdf = entry.path().join("paper.pdf");
-        if pdf.exists() {
-            if pdf.is_file() {
-                pdfs += 1
-            } else {
-                errors.push(format!("{name}: paper.pdf is not a regular file"))
-            }
-        }
-    }
-    for keys in dois.values().filter(|v| v.len() > 1) {
-        warnings.push(format!("duplicate DOI: {}", keys.join(", ")))
-    }
-    println!("Repository: {}\n\n✓ configuration valid\n✓ {count} references discovered\n✓ {parsed} metadata files parsed\n✓ {pdfs} PDFs found",repo.root().display());
+    let report = doctor::inspect(repo)?;
+    let warnings = report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Warning)
+        .collect::<Vec<_>>();
+    let errors = report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
+    println!("Repository: {}\n\n✓ configuration valid\n✓ {} references discovered\n✓ {} metadata files parsed\n{} {} / {} references have source PDFs", repo.root().display(), report.references_total, report.metadata_parsed, if report.references_without_source_pdf == 0 && errors.iter().all(|d| !matches!(d, r#ref::doctor::DoctorDiagnostic::InvalidSourcePdf { .. })) { "✓" } else { "!" }, report.references_with_source_pdf, report.references_total);
     if !warnings.is_empty() {
         println!("\nWarnings:");
         for w in &warnings {
-            println!("  {w}")
+            println!("  {}", w.message())
         }
     }
     if !errors.is_empty() {
         println!("\nErrors:");
         for e in &errors {
-            println!("  {e}")
+            println!("  {}", e.message())
         }
     }
     println!(
-        "\n{count} references, {} warnings, {} errors",
-        warnings.len(),
-        errors.len()
+        "\n{} references, {} warnings, {} errors",
+        report.references_total,
+        report.warning_count(),
+        report.error_count()
     );
     Ok(u8::from(
         !errors.is_empty() || (strict && !warnings.is_empty()),
