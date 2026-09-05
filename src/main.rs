@@ -5,6 +5,7 @@ use r#ref::{
     export,
     import::{self, ImportResult},
     launch::{self, Editor, Environment, FileOpener},
+    metadata::{Doi, DoiMetadataClient},
     model::{
         display_author, generated_key, validate_year, CitationKey, Person, Reference, ReferenceType,
     },
@@ -100,8 +101,8 @@ enum Commands {
 }
 #[derive(Args)]
 struct AddArgs {
-    /// PDF to attach (required unless --no-pdf is used)
-    #[arg(required_unless_present = "no_pdf", conflicts_with = "no_pdf")]
+    /// PDF to attach (required unless --no-pdf or --doi is used)
+    #[arg(required_unless_present_any = ["no_pdf", "doi"], conflicts_with_all = ["no_pdf", "doi"])]
     pdf: Option<PathBuf>,
     /// Create a reference without an attached PDF
     #[arg(long, conflicts_with = "pdf")]
@@ -123,6 +124,7 @@ struct AddArgs {
     container_title: Option<String>,
     #[arg(long)]
     publisher: Option<String>,
+    /// Retrieve CSL-JSON metadata for this DOI (requires network access; creates no PDF)
     #[arg(long)]
     doi: Option<String>,
     #[arg(long)]
@@ -286,6 +288,12 @@ fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {
     if a.no_pdf && a.pdf.is_some() {
         bail!("a PDF and --no-pdf cannot be used together")
     }
+    // With no supplied title, --doi is the metadata source. Retain the established
+    // `--no-pdf --title ... --doi ...` form for manually entered metadata.
+    if a.title.is_none() && a.doi.is_some() {
+        let value = a.doi.take().unwrap_or_default();
+        return add_from_doi(repo, &a, value);
+    }
     if !a.no_pdf {
         let p = a
             .pdf
@@ -336,21 +344,7 @@ fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {
             .interact_text()
             .map_err(Into::into)
     })?;
-    let base = generated_key(a.author.first().map_or("reference", |x| &x.family), a.year);
-    let mut proposed = base.clone();
-    let mut suffix = b'a';
-    while repo.contains(&CitationKey::new(&proposed)?) {
-        proposed = format!("{base}{}", suffix as char);
-        suffix += 1;
-    }
-    let key = match a.key {
-        Some(k) => k,
-        None if interactive => Input::new()
-            .with_prompt("Citation key")
-            .default(proposed)
-            .interact_text()?,
-        None => proposed,
-    };
+    let supplied_key = a.key.take();
     let metadata = Reference {
         entry_type: a.entry_type,
         title: a.title.unwrap_or_default(),
@@ -361,15 +355,83 @@ fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {
         volume: None,
         issue: None,
         pages: None,
-        doi: a.doi,
+        doi: a.doi.map(|value| {
+            value
+                .parse::<Doi>()
+                .map_or(value.clone(), |doi| doi.to_string())
+        }),
         url: a.url,
         tags: a.tags,
         notes: None,
     };
-    let key = CitationKey::new(key)?;
-    repo.add(&key, &metadata, a.pdf.as_deref())?;
+    let key = add_reference(repo, metadata, supplied_key, a.pdf.as_deref(), interactive)?;
     println!("Added {key}");
     Ok(())
+}
+
+fn add_from_doi(repo: &Repository, args: &AddArgs, value: String) -> Result<()> {
+    let doi: Doi = value.parse()?;
+    if let Some(existing) = find_doi(repo, &doi)? {
+        bail!("DOI already exists\n\n{doi} is already stored as `{existing}`");
+    }
+    eprintln!("Retrieving metadata for DOI {doi}...");
+    let client = match env::var("REF_DOI_RESOLVER") {
+        Ok(resolver) => {
+            DoiMetadataClient::with_resolver(&resolver, std::time::Duration::from_secs(15))?
+        }
+        Err(_) => DoiMetadataClient::new()?,
+    };
+    let mut metadata = client.lookup(&doi)?;
+    metadata.tags = args.tags.clone();
+    let key = add_reference(repo, metadata, args.key.clone(), None, false)?;
+    println!("Added {key}");
+    Ok(())
+}
+
+fn find_doi(repo: &Repository, sought: &Doi) -> Result<Option<CitationKey>> {
+    for stored in repo.load_all()? {
+        if stored
+            .metadata
+            .doi
+            .as_deref()
+            .and_then(|value| value.parse::<Doi>().ok())
+            .is_some_and(|doi| &doi == sought)
+        {
+            return Ok(Some(stored.key));
+        }
+    }
+    Ok(None)
+}
+
+fn add_reference(
+    repo: &Repository,
+    metadata: Reference,
+    supplied_key: Option<String>,
+    pdf: Option<&Path>,
+    interactive: bool,
+) -> Result<CitationKey> {
+    metadata.validate()?;
+    let base = generated_key(
+        metadata.authors.first().map_or("reference", |x| &x.family),
+        metadata.year,
+    );
+    let mut proposed = base.clone();
+    let mut suffix = b'a';
+    while repo.contains(&CitationKey::new(&proposed)?) {
+        proposed = format!("{base}{}", suffix as char);
+        suffix += 1;
+    }
+    let key = match supplied_key {
+        Some(key) => key,
+        None if interactive => Input::new()
+            .with_prompt("Citation key")
+            .default(proposed)
+            .interact_text()?,
+        None => proposed,
+    };
+    let key = CitationKey::new(key)?;
+    repo.add(&key, &metadata, pdf)?;
+    Ok(key)
 }
 
 fn table(items: &[StoredReference]) {
@@ -573,16 +635,6 @@ fn export_cmd(repo: &Repository, format: &str, output: Option<&Path>) -> Result<
     Ok(())
 }
 
-fn valid_doi(s: &str) -> bool {
-    let Some((prefix, suffix)) = s.split_once('/') else {
-        return false;
-    };
-    prefix.starts_with("10.")
-        && prefix[3..].chars().all(|c| c.is_ascii_digit())
-        && prefix.len() > 3
-        && !suffix.trim().is_empty()
-        && !s.chars().any(char::is_whitespace)
-}
 fn doctor(repo: &Repository, strict: bool) -> Result<u8> {
     repo.validate_structure()?;
     let mut warnings = Vec::new();
@@ -632,12 +684,10 @@ fn doctor(repo: &Repository, strict: bool) -> Result<u8> {
             warnings.push(format!("{name}: authors missing"))
         }
         if let Some(doi) = metadata.doi {
-            if !valid_doi(&doi) {
-                errors.push(format!("{name}: malformed DOI"))
+            match doi.parse::<Doi>() {
+                Ok(doi) => dois.entry(doi.to_string()).or_default().push(name.clone()),
+                Err(_) => errors.push(format!("{name}: malformed DOI")),
             }
-            dois.entry(doi.to_lowercase())
-                .or_default()
-                .push(name.clone());
         }
         let pdf = entry.path().join("paper.pdf");
         if pdf.exists() {

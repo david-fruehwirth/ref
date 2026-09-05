@@ -51,7 +51,7 @@ Manual edits and copied reference directories are immediately visible. Commit `.
 | Command | Purpose |
 |---|---|
 | `ref init` | Initialize `.ref` in the current directory |
-| `ref add FILE [flags]` / `ref add --no-pdf` | Add metadata, optionally with a copied PDF |
+| `ref add FILE [flags]` / `ref add --no-pdf` / `ref add --doi DOI` | Add metadata from flags, a PDF, or a DOI |
 | `ref list [--sort key|year|author|title]` | List the collection |
 | `ref search QUERY [--key|--author|--title|--year|--tag]` | Search metadata |
 | `ref show KEY` | Show one exact key |
@@ -85,11 +85,20 @@ ref add --no-pdf \
   --title "Online Reference" \
   --author "Jane, Smith" \
   --year 2024
+
+# Retrieve CSL-JSON metadata through doi.org; no PDF is downloaded.
+ref add --doi 10.1038/nrd842
 ```
 
 Each repeatable `--author` uses `Given names, Family name`; `John,Doe` is also
 accepted. In a non-interactive invocation, the citation key is generated from the first
 author and year unless `--key` supplies it explicitly.
+
+DOI lookup requires network access and a `curl` executable, and creates a reference
+without a managed PDF.
+Metadata is requested from `doi.org` using CSL-JSON content negotiation, then stored
+in the same human-readable `.ref/refs/<key>/ref.yaml` file as every other reference.
+You can inspect or edit that YAML normally after the lookup.
 
 ## Importing an existing bibliography
 
@@ -117,4 +126,4 @@ file is never modified.
 
 Data safety, predictable behavior, readable YAML, and useful Git diffs take precedence over features. Writes use temporary paths and rename. Collection operations scan metadata, which is intentionally appropriate for thesis-sized libraries.
 
-The MVP has no GUI, cloud sync, database, metadata lookup, attachment import, annotation handling, full-text indexing, citation insertion, or global library. It supports one optional PDF, local BibTeX/BibLaTeX metadata import, and one BibLaTeX exporter per reference. Cross-reference inheritance, editors, and unsupported fields are not imported; unknown entry types fall back to `misc`.
+The MVP has no GUI, cloud sync, database, PDF discovery, attachment import, annotation handling, full-text indexing, citation insertion, or global library. It supports DOI metadata lookup, one optional PDF, local BibTeX/BibLaTeX metadata import, and one BibLaTeX exporter per reference. Cross-reference inheritance, editors, and unsupported fields are not imported; unknown entry types fall back to `misc`.
