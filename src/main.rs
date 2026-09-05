@@ -313,6 +313,10 @@ fn resolve_year(
     }
 }
 
+fn repo() -> Result<Repository> {
+    Repository::discover(&env::current_dir()?)
+}
+
 struct Execution {
     command: &'static str,
     output: CommandOutput,
@@ -340,13 +344,14 @@ fn main() -> ExitCode {
         .skip(1)
         .filter_map(|argument| argument.to_str())
         .find(|argument| !argument.starts_with('-'))
-        .unwrap_or("ref");
+        .unwrap_or("ref")
+        .to_owned();
     let cli = match Cli::try_parse_from(arguments) {
         Ok(cli) => cli,
         Err(error) if requested_json => {
             output::render_error(
                 OutputFormat::Json,
-                parsed_command,
+                &parsed_command,
                 &anyhow::anyhow!(error.to_string()),
             );
             return ExitCode::from(2);
