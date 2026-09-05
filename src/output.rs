@@ -54,6 +54,10 @@ pub struct ErrorOutput {
 
 pub trait HumanRenderable {
     fn render_human(&self, writer: &mut dyn Write) -> Result<()>;
+
+    fn render_human_stderr(&self, _writer: &mut dyn Write) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub fn render<T: Serialize + HumanRenderable>(
@@ -68,6 +72,7 @@ pub fn render<T: Serialize + HumanRenderable>(
             for warning in warnings {
                 eprintln!("warning: {}", warning.message);
             }
+            value.render_human_stderr(&mut std::io::stderr())?;
             value.render_human(&mut std::io::stdout())
         }
         OutputFormat::Json => {
@@ -353,6 +358,41 @@ impl HumanRenderable for CommandOutput {
                 for heading in ["warning", "error"] { let ds: Vec<_> = diagnostics.iter().filter(|d| d.severity == heading).collect(); if !ds.is_empty() { writeln!(w, "\n{}s:", if heading == "warning" { "Warning" } else { "Error" })?; for d in ds { writeln!(w, "  {}", d.message)?; } } }
                 writeln!(w, "\n{reference_count} references, {warning_count} warnings, {error_count} errors")?;
             }
+        }
+        Ok(())
+    }
+
+    fn render_human_stderr(&self, w: &mut dyn Write) -> Result<()> {
+        match self {
+            Self::Import {
+                skipped_references,
+                failed_references,
+                ..
+            } => {
+                for diagnostic in skipped_references {
+                    writeln!(
+                        w,
+                        "warning: skipped `{}`\n  {}",
+                        diagnostic.citation_key, diagnostic.message
+                    )?;
+                }
+                for diagnostic in failed_references {
+                    writeln!(
+                        w,
+                        "warning: failed to import `{}`\n  {}",
+                        diagnostic.citation_key, diagnostic.message
+                    )?;
+                }
+            }
+            Self::Clean {
+                failed_references, ..
+            } if !failed_references.is_empty() => {
+                writeln!(w, "\nFailed to remove:")?;
+                for diagnostic in failed_references {
+                    writeln!(w, "  {}: {}", diagnostic.citation_key, diagnostic.message)?;
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
