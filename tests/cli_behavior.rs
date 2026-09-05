@@ -32,7 +32,7 @@ fn cli_wires_init_add_list_search_show_rename_remove_and_export() {
             "--title",
             "Relevance Feedback",
             "--author",
-            "Jane|Smith",
+            "Jane, Smith",
             "--year",
             "2024",
             "--tags",
@@ -135,7 +135,7 @@ fn doctor_maps_healthy_warnings_and_errors_to_exit_codes() {
             "--title",
             "Healthy",
             "--author",
-            "Jane|Smith",
+            "Jane, Smith",
             "--year",
             "2024",
         ])
@@ -225,7 +225,7 @@ fn doctor_distinguishes_duplicate_and_malformed_dois() {
                 "--title",
                 key,
                 "--author",
-                "Jane|Smith",
+                "Jane, Smith",
                 "--year",
                 "2024",
                 "--doi",
@@ -258,7 +258,7 @@ fn doctor_distinguishes_duplicate_and_malformed_dois() {
             "--title",
             "Bad DOI",
             "--author",
-            "Jane|Smith",
+            "Jane, Smith",
             "--year",
             "2024",
             "--doi",
@@ -271,4 +271,95 @@ fn doctor_distinguishes_duplicate_and_malformed_dois() {
         .assert()
         .code(1)
         .stdout(predicate::str::contains("malformed DOI"));
+}
+
+#[test]
+fn add_accepts_cli_metadata_attaches_pdf_and_generates_key() {
+    let temp = tempfile::tempdir().unwrap();
+    support::command(temp.path()).arg("init").assert().success();
+    fs::write(temp.path().join("paper.pdf"), b"%PDF-1.4\n").unwrap();
+    support::command(temp.path())
+        .args([
+            "add",
+            "paper.pdf",
+            "--title",
+            "Example Paper",
+            "--author",
+            "John,Doe",
+            "--author",
+            " Sam , Altman ",
+            "--year",
+            "2024",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Added doe2024"));
+    let stored = r#ref::repository::Repository::discover(temp.path())
+        .unwrap()
+        .load_reference(&r#ref::model::CitationKey::new("doe2024").unwrap())
+        .unwrap();
+    assert_eq!(stored.metadata.title, "Example Paper");
+    assert_eq!(stored.metadata.year, Some(2024));
+    assert_eq!(
+        stored.metadata.authors,
+        vec![
+            r#ref::model::Person {
+                given: "John".into(),
+                family: "Doe".into()
+            },
+            r#ref::model::Person {
+                given: "Sam".into(),
+                family: "Altman".into()
+            },
+        ]
+    );
+    assert!(stored.has_pdf);
+    support::command(temp.path())
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0 warnings, 0 errors"));
+}
+
+#[test]
+fn add_without_pdf_uses_metadata_and_rejects_bad_inputs_and_conflicts() {
+    let temp = tempfile::tempdir().unwrap();
+    support::command(temp.path()).arg("init").assert().success();
+    support::command(temp.path())
+        .args([
+            "add",
+            "--no-pdf",
+            "--title",
+            "Example",
+            "--author",
+            " John , Doe ",
+            "--year",
+            "2024",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Added doe2024"));
+    assert!(!temp.path().join(".ref/refs/doe2024/paper.pdf").exists());
+
+    for author in ["John Doe", "John,", ",Doe"] {
+        support::command(temp.path())
+            .args([
+                "add", "--no-pdf", "--title", "Bad", "--author", author, "--year", "2024",
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Given names, Family name"));
+    }
+    support::command(temp.path())
+        .args(["add", "--no-pdf", "--title", "Bad year", "--year", "999"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not plausible"));
+    fs::write(temp.path().join("other.pdf"), b"%PDF").unwrap();
+    support::command(temp.path())
+        .args(["add", "other.pdf", "--no-pdf", "--title", "Bad"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+    assert!(!temp.path().join(".ref/refs/bad").exists());
 }

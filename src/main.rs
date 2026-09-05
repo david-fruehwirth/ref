@@ -4,7 +4,9 @@ use dialoguer::{Confirm, Input};
 use r#ref::{
     export,
     launch::{self, Editor, Environment, FileOpener},
-    model::{display_author, generated_key, CitationKey, Person, Reference, ReferenceType},
+    model::{
+        display_author, generated_key, validate_year, CitationKey, Person, Reference, ReferenceType,
+    },
     repository::{Repository, StoredReference},
 };
 use std::{
@@ -92,16 +94,22 @@ enum Commands {
 }
 #[derive(Args)]
 struct AddArgs {
+    /// PDF to attach (required unless --no-pdf is used)
+    #[arg(required_unless_present = "no_pdf", conflicts_with = "no_pdf")]
     pdf: Option<PathBuf>,
-    #[arg(long)]
+    /// Create a reference without an attached PDF
+    #[arg(long, conflicts_with = "pdf")]
     no_pdf: bool,
     #[arg(long)]
     key: Option<String>,
+    /// Publication title
     #[arg(long)]
     title: Option<String>,
+    /// Author in `Given names, Family name` format; may be specified multiple times
     #[arg(long, value_parser=parse_author)]
     author: Vec<Person>,
-    #[arg(long)]
+    /// Publication year
+    #[arg(long, value_parser=parse_year)]
     year: Option<u16>,
     #[arg(long = "type", default_value = "article")]
     entry_type: ReferenceType,
@@ -139,14 +147,46 @@ enum Sort {
 }
 
 fn parse_author(s: &str) -> std::result::Result<Person, String> {
-    let (given, family) = s.split_once('|').ok_or("author must use given|family")?;
-    if family.trim().is_empty() {
-        return Err("author family name cannot be empty".into());
+    let hint =
+        || format!("invalid author `{s}`; use `Given names, Family name`, for example `John, Doe`");
+    let (given, family) = s.split_once(',').ok_or_else(hint)?;
+    let given = given.trim();
+    let family = family.trim();
+    if given.is_empty() || family.is_empty() {
+        return Err(hint());
     }
     Ok(Person {
-        given: given.into(),
-        family: family.into(),
+        given: given.to_owned(),
+        family: family.to_owned(),
     })
+}
+
+fn parse_year(s: &str) -> std::result::Result<u16, String> {
+    let year = s
+        .parse::<u16>()
+        .map_err(|_| format!("invalid publication year `{s}`"))?;
+    validate_year(year).map_err(|error| error.to_string())?;
+    Ok(year)
+}
+
+fn resolve_year(
+    supplied: Option<u16>,
+    interactive: bool,
+    mut prompt: impl FnMut() -> Result<String>,
+) -> Result<Option<u16>> {
+    if supplied.is_some() || !interactive {
+        return Ok(supplied);
+    }
+    loop {
+        let value = prompt()?;
+        if value.trim().is_empty() {
+            return Ok(None);
+        }
+        match parse_year(value.trim()) {
+            Ok(year) => return Ok(Some(year)),
+            Err(error) => eprintln!("Invalid year: {error}. Please try again."),
+        }
+    }
 }
 fn repo() -> Result<Repository> {
     Repository::discover(&env::current_dir()?)
@@ -233,6 +273,13 @@ fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {
     if a.author.is_empty() {
         eprintln!("warning: reference has no authors")
     }
+    a.year = resolve_year(a.year, interactive, || {
+        Input::new()
+            .with_prompt("Year (leave blank if unknown)")
+            .allow_empty(true)
+            .interact_text()
+            .map_err(Into::into)
+    })?;
     let base = generated_key(a.author.first().map_or("reference", |x| &x.family), a.year);
     let mut proposed = base.clone();
     let mut suffix = b'a';
@@ -246,7 +293,7 @@ fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {
             .with_prompt("Citation key")
             .default(proposed)
             .interact_text()?,
-        None => bail!("--key is required when stdin is not interactive"),
+        None => proposed,
     };
     let metadata = Reference {
         entry_type: a.entry_type,
@@ -569,4 +616,37 @@ fn doctor(repo: &Repository, strict: bool) -> Result<u8> {
     Ok(u8::from(
         !errors.is_empty() || (strict && !warnings.is_empty()),
     ))
+}
+
+#[cfg(test)]
+mod add_tests {
+    use super::*;
+
+    #[test]
+    fn interactive_year_is_collected_and_invalid_input_is_retried() {
+        let mut answers = ["not-a-year", "2024"].into_iter();
+        let year = resolve_year(None, true, || Ok(answers.next().unwrap().to_owned())).unwrap();
+        let reference = Reference {
+            entry_type: ReferenceType::Article,
+            title: "Example".into(),
+            authors: vec![],
+            year,
+            container_title: None,
+            publisher: None,
+            volume: None,
+            issue: None,
+            pages: None,
+            doi: None,
+            url: None,
+            tags: vec![],
+            notes: None,
+        };
+        assert_eq!(reference.year, Some(2024));
+    }
+
+    #[test]
+    fn supplied_year_never_prompts() {
+        let year = resolve_year(Some(1971), true, || bail!("unexpected prompt")).unwrap();
+        assert_eq!(year, Some(1971));
+    }
 }

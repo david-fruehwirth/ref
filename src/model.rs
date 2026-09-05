@@ -106,12 +106,18 @@ impl Reference {
             }
         }
         if let Some(year) = self.year {
-            if !(1000..=3000).contains(&year) {
-                bail!("year `{year}` is not plausible");
-            }
+            validate_year(year)?;
         }
         Ok(())
     }
+}
+
+/// Validate a publication year consistently at every input boundary.
+pub fn validate_year(year: u16) -> Result<()> {
+    if !(1000..=3000).contains(&year) {
+        bail!("year `{year}` is not plausible");
+    }
+    Ok(())
 }
 
 pub fn generated_key(family: &str, year: Option<u16>) -> String {

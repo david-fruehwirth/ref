@@ -62,7 +62,33 @@ Manual edits and copied reference directories are immediately visible. Commit `.
 | `ref export [biblatex] [--output FILE]` | Produce deterministic UTF-8 BibLaTeX |
 | `ref doctor [--strict]` | Validate structure, metadata, DOI syntax, and duplicates |
 
-Run `ref COMMAND --help` for flags. Non-interactive adds require `--key` and `--title`; authors use `--author 'Given|Family'` and may be repeated.
+Run `ref COMMAND --help` for flags. Non-interactive adds require `--title`; `--key` is optional.
+
+`ref add` prompts for missing title, authors, publication year, and citation key when run
+interactively. Primary metadata can instead be provided directly (quote author values that
+contain spaces):
+
+```sh
+ref add ~/Downloads/paper.pdf \
+  --title "Relevance Feedback in Information Retrieval" \
+  --author "Joseph J., Rocchio" \
+  --year 1971
+
+ref add paper.pdf \
+  --title "Example Paper" \
+  --author "Jane, Smith" \
+  --author "John, Doe" \
+  --year 2024
+
+ref add --no-pdf \
+  --title "Online Reference" \
+  --author "Jane, Smith" \
+  --year 2024
+```
+
+Each repeatable `--author` uses `Given names, Family name`; `John,Doe` is also
+accepted. In a non-interactive invocation, the citation key is generated from the first
+author and year unless `--key` supplies it explicitly.
 
 ## Design and limitations
 
