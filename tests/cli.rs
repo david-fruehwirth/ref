@@ -21,7 +21,7 @@ fn no_pdf_workflow_and_export() {
             "--title",
             "An Example",
             "--author",
-            "Jane|Smith",
+            "Jane, Smith",
             "--year",
             "2024",
         ])
@@ -63,7 +63,7 @@ fn pdf_is_copied_and_duplicate_rejected() {
         "--title",
         "X",
         "--author",
-        "A|B",
+        "A, B",
     ];
     cmd(t.path()).args(args).assert().success();
     assert_eq!(
@@ -83,7 +83,7 @@ fn doctor_strict_treats_warning_as_failure() {
     cmd(t.path()).arg("init").assert().success();
     cmd(t.path())
         .args([
-            "add", "--no-pdf", "--key", "x", "--title", "X", "--author", "A|B",
+            "add", "--no-pdf", "--key", "x", "--title", "X", "--author", "A, B",
         ])
         .assert()
         .success();
