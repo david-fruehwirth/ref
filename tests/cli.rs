@@ -87,6 +87,55 @@ fn doctor_strict_treats_warning_as_failure() {
         ])
         .assert()
         .success();
-    cmd(t.path()).arg("doctor").assert().success();
+    cmd(t.path())
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("x: source PDF missing"))
+        .stdout(predicate::str::contains(
+            "0 / 1 references have source PDFs",
+        ));
     cmd(t.path()).args(["doctor", "--strict"]).assert().code(1);
+}
+
+#[test]
+fn attach_copies_without_overwriting_and_resolves_doctor_warning() {
+    let t = tempfile::tempdir().unwrap();
+    cmd(t.path()).arg("init").assert().success();
+    cmd(t.path())
+        .args([
+            "add", "--no-pdf", "--key", "x", "--title", "X", "--author", "A, B", "--year", "2024",
+        ])
+        .assert()
+        .success();
+    let source = t.path().join("source.pdf");
+    fs::write(&source, b"first source").unwrap();
+    cmd(t.path())
+        .args(["attach", "x", "source.pdf"])
+        .assert()
+        .success();
+    assert_eq!(fs::read(&source).unwrap(), b"first source");
+    cmd(t.path())
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "1 / 1 references have source PDFs",
+        ))
+        .stdout(predicate::str::contains("source PDF missing").not());
+
+    fs::write(t.path().join("second.pdf"), b"second source").unwrap();
+    cmd(t.path())
+        .args(["attach", "x", "second.pdf"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already has a source PDF"));
+    assert_eq!(
+        fs::read(t.path().join(".ref/refs/x/paper.pdf")).unwrap(),
+        b"first source"
+    );
+    assert_eq!(
+        fs::read(t.path().join("second.pdf")).unwrap(),
+        b"second source"
+    );
 }

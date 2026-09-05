@@ -24,6 +24,13 @@ pub struct Repository {
     root: PathBuf,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SourceProofStatus {
+    Present(PathBuf),
+    Missing,
+    Invalid(String),
+}
+
 impl Repository {
     pub fn init(project: &Path) -> Result<Self> {
         let root = project.join(".ref");
@@ -62,6 +69,58 @@ impl Repository {
     }
     pub fn contains(&self, key: &CitationKey) -> bool {
         self.reference_path(key).is_dir()
+    }
+
+    /// Inspect the canonical source artifact. `metadata` follows symlinks, which
+    /// keeps this policy consistent with opening an attachment via `is_file`.
+    pub fn source_proof_status(&self, key: &CitationKey) -> SourceProofStatus {
+        let path = self.reference_path(key).join("paper.pdf");
+        match fs::metadata(&path) {
+            Ok(metadata) if !metadata.is_file() => {
+                SourceProofStatus::Invalid("expected a regular file".into())
+            }
+            Ok(metadata) if metadata.len() == 0 => {
+                SourceProofStatus::Invalid("file is empty".into())
+            }
+            Ok(_) => SourceProofStatus::Present(path),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                SourceProofStatus::Missing
+            }
+            Err(error) => SourceProofStatus::Invalid(format!("cannot inspect file: {error}")),
+        }
+    }
+
+    pub fn attach(&self, key: &CitationKey, source: &Path) -> Result<()> {
+        if !self.contains(key) {
+            bail!("reference `{key}` does not exist");
+        }
+        if !source.is_file() {
+            bail!(
+                "PDF `{}` does not exist or is not a regular file",
+                source.display()
+            );
+        }
+        if !source
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+        {
+            bail!("file must have a .pdf extension");
+        }
+        if fs::metadata(source)?.len() == 0 {
+            bail!("PDF `{}` is empty", source.display());
+        }
+        let destination = self.reference_path(key).join("paper.pdf");
+        if destination.exists() {
+            bail!("reference `{key}` already has a source PDF");
+        }
+        let mut temporary = tempfile::NamedTempFile::new_in(self.reference_path(key))?;
+        let mut input = fs::File::open(source)?;
+        std::io::copy(&mut input, &mut temporary)?;
+        temporary
+            .persist_noclobber(&destination)
+            .map_err(|error| error.error)
+            .with_context(|| format!("failed to attach source PDF to `{key}`"))?;
+        Ok(())
     }
 
     pub fn validate_structure(&self) -> Result<()> {

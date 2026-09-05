@@ -53,7 +53,10 @@ fn add_from_doi_uses_normal_no_pdf_persistence_and_detects_duplicates() {
     support::command(temp.path())
         .args(["doctor", "--strict"])
         .assert()
-        .success();
+        .code(1)
+        .stdout(predicate::str::contains(
+            "Doe2024ExampleArticle: source PDF missing",
+        ));
     support::command(temp.path())
         .args(["add", "--doi", "https://doi.org/10.1234/example"])
         .assert()
@@ -240,7 +243,7 @@ fn doctor_maps_healthy_warnings_and_errors_to_exit_codes() {
         .arg("doctor")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0 warnings, 0 errors"));
+        .stdout(predicate::str::contains("source PDF missing"));
 
     let warning = tempfile::tempdir().unwrap();
     support::command(warning.path())

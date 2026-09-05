@@ -418,8 +418,29 @@ and diagnostics identify affected citation keys. Never rely on color alone.
 `doctor` is the integrity boundary for human-editable storage. It validates the
 repository version and layout and diagnoses invalid keys, missing/malformed YAML,
 invalid domain metadata, malformed or duplicate DOIs, and broken `paper.pdf`
-entries. A missing PDF is valid. Missing recommended fields such as authors or year
-are warnings; `doctor --strict` turns warnings into failure for stronger CI policy.
+entries. A missing PDF is valid repository state but is a source-quality warning.
+Missing recommended fields such as authors or year are also warnings; `doctor
+--strict` turns warnings into failure for stronger CI policy.
+
+## Source Evidence
+
+Metadata is not evidence. A DOI, title, authors, year, or imported bibliography
+entry establishes bibliographic identity, but does not demonstrate that the
+underlying publication was locally available for inspection. Bibliographic
+metadata and source availability are therefore separate concerns.
+
+A reference may validly exist without an attachment, especially after BibTeX
+import, DOI lookup, or `ref add --no-pdf`. For the current repository format, a
+non-empty canonical `paper.pdf` is the source proof. `ref doctor` evaluates both
+structural integrity and repository quality expectations: it reports a missing
+source PDF as a warning, while an empty or non-file `paper.pdf` is an error.
+`ref doctor --strict` can consequently serve as a thesis-quality gate requiring
+locally available source material for every reference.
+
+PDF presence proves only that a source artifact is available. It does not prove
+that it is the correct publication, was read or interpreted correctly, is
+scientifically valid, or supports any particular claim. Richer evidence types may
+be considered in the future without changing the current `paper.pdf` convention.
 
 ## Testing Philosophy
 

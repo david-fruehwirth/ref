@@ -166,7 +166,8 @@ fn cli_imports_exports_and_reports_partial_status() {
     support::command(temp.path())
         .arg("doctor")
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("smith2024: source PDF missing"));
 
     fs::write(
         temp.path().join("partial.bib"),
