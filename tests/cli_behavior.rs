@@ -313,7 +313,7 @@ fn add_accepts_cli_metadata_attaches_pdf_and_generates_key() {
             },
         ]
     );
-    assert!(stored.pdf_path().is_some());
+    assert!(stored.has_pdf);
     support::command(temp.path())
         .arg("doctor")
         .assert()

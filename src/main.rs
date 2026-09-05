@@ -316,39 +316,6 @@ fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod add_tests {
-    use super::*;
-
-    #[test]
-    fn interactive_year_is_collected_and_invalid_input_is_retried() {
-        let mut answers = ["not-a-year", "2024"].into_iter();
-        let year = resolve_year(None, true, || Ok(answers.next().unwrap().to_owned())).unwrap();
-        let reference = Reference {
-            entry_type: ReferenceType::Article,
-            title: "Example".into(),
-            authors: vec![],
-            year,
-            container_title: None,
-            publisher: None,
-            volume: None,
-            issue: None,
-            pages: None,
-            doi: None,
-            url: None,
-            tags: vec![],
-            notes: None,
-        };
-        assert_eq!(reference.year, Some(2024));
-    }
-
-    #[test]
-    fn supplied_year_never_prompts() {
-        let year = resolve_year(Some(1971), true, || bail!("unexpected prompt")).unwrap();
-        assert_eq!(year, Some(1971));
-    }
-}
-
 fn table(items: &[StoredReference]) {
     println!("{:<20} {:<6} {:<22} TITLE", "KEY", "YEAR", "AUTHOR");
     for r in items {
@@ -649,4 +616,37 @@ fn doctor(repo: &Repository, strict: bool) -> Result<u8> {
     Ok(u8::from(
         !errors.is_empty() || (strict && !warnings.is_empty()),
     ))
+}
+
+#[cfg(test)]
+mod add_tests {
+    use super::*;
+
+    #[test]
+    fn interactive_year_is_collected_and_invalid_input_is_retried() {
+        let mut answers = ["not-a-year", "2024"].into_iter();
+        let year = resolve_year(None, true, || Ok(answers.next().unwrap().to_owned())).unwrap();
+        let reference = Reference {
+            entry_type: ReferenceType::Article,
+            title: "Example".into(),
+            authors: vec![],
+            year,
+            container_title: None,
+            publisher: None,
+            volume: None,
+            issue: None,
+            pages: None,
+            doi: None,
+            url: None,
+            tags: vec![],
+            notes: None,
+        };
+        assert_eq!(reference.year, Some(2024));
+    }
+
+    #[test]
+    fn supplied_year_never_prompts() {
+        let year = resolve_year(Some(1971), true, || bail!("unexpected prompt")).unwrap();
+        assert_eq!(year, Some(1971));
+    }
 }
