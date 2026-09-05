@@ -3,6 +3,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input};
 use r#ref::{
     export,
+    launch::{self, Editor, Environment, FileOpener},
     model::{display_author, generated_key, CitationKey, Person, Reference, ReferenceType},
     repository::{Repository, StoredReference},
 };
@@ -13,6 +14,31 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, ExitCode},
 };
+
+struct SystemOpener;
+impl FileOpener for SystemOpener {
+    fn open(&self, path: &Path) -> Result<()> {
+        open::that_detached(path).map_err(Into::into)
+    }
+}
+struct SystemEnvironment;
+impl Environment for SystemEnvironment {
+    fn variable(&self, name: &str) -> Option<std::ffi::OsString> {
+        env::var_os(name)
+    }
+}
+struct SystemEditor;
+impl Editor for SystemEditor {
+    fn edit(&self, command: &str, path: &Path) -> Result<bool> {
+        let mut parts = command.split_whitespace();
+        let program = parts.next().context("editor command is empty")?;
+        Ok(Command::new(program)
+            .args(parts)
+            .arg(path)
+            .status()?
+            .success())
+    }
+}
 
 #[derive(Parser)]
 #[command(
@@ -389,34 +415,12 @@ fn show(r: &StoredReference) {
     }
 }
 fn open_pdf(repo: &Repository, key: String) -> Result<()> {
-    let r = repo.load_reference(&CitationKey::new(key)?)?;
-    let pdf = r.path.join("paper.pdf");
-    if !pdf.is_file() {
-        bail!("reference `{}` has no PDF", r.key)
-    }
-    open::that_detached(&pdf).with_context(|| format!("failed to open {}", pdf.display()))?;
-    Ok(())
+    launch::open_reference(repo, &CitationKey::new(key)?, &SystemOpener)
 }
 fn edit(repo: &Repository, key: String) -> Result<()> {
-    let r = repo.load_reference(&CitationKey::new(key)?)?;
-    let editor = env::var("VISUAL")
-        .or_else(|_| env::var("EDITOR"))
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "no editor configured\nhint: set the VISUAL or EDITOR environment variable"
-            )
-        })?;
-    let mut parts = editor.split_whitespace();
-    let program = parts.next().context("editor command is empty")?;
-    let status = Command::new(program)
-        .args(parts)
-        .arg(r.path.join("ref.yaml"))
-        .status()?;
-    if !status.success() {
-        bail!("editor exited unsuccessfully")
-    };
-    repo.load_reference(&r.key)?;
-    println!("Updated {}", r.key);
+    let key = CitationKey::new(key)?;
+    launch::edit_reference(repo, &key, &SystemEnvironment, &SystemEditor)?;
+    println!("Updated {key}");
     Ok(())
 }
 fn remove(repo: &Repository, key: String, yes: bool) -> Result<()> {
