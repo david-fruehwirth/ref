@@ -139,6 +139,31 @@ Quote values containing spaces so the shell passes each author as one argument. 
 
 ## Command reference
 
+### Machine-readable output
+
+Every command that produces application output accepts the global `--json` flag,
+either before or after the command name:
+
+```bash
+ref list --json
+ref search attention --json
+ref doctor --json
+ref clean --dry-run --json
+```
+
+JSON output is intended for scripts, editors, CI, and AI tools. Successful results
+are written as one pretty-printed JSON document to stdout; structured command
+failures are written to stderr while stdout remains empty. JSON mode is always
+non-interactive, so destructive commands require `--yes`. The top-level
+`schema_version` versions this machine-output API independently of the repository
+format version. For example, `jq` can select matching citation keys (it is not a
+dependency of `ref`):
+
+```bash
+ref search attention --json |
+  jq -r '.result.matching_references[].citation_key'
+```
+
 | Command | Purpose |
 | --- | --- |
 | `ref init` | Initialize a `.ref` repository |
