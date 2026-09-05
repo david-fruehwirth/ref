@@ -5,6 +5,9 @@ use r#ref::{
 };
 use std::path::Path;
 
+// Each integration-test file is compiled as a separate crate, so a helper used by
+// one suite can legitimately be unused by another suite importing this module.
+#[allow(dead_code)]
 pub fn command(dir: &Path) -> Command {
     let mut command = Command::cargo_bin("ref").expect("compiled ref binary");
     command
@@ -15,6 +18,7 @@ pub fn command(dir: &Path) -> Command {
     command
 }
 
+#[allow(dead_code)]
 pub fn sample(title: &str, family: &str, year: Option<u16>) -> Reference {
     Reference {
         entry_type: ReferenceType::Article,
@@ -36,6 +40,7 @@ pub fn sample(title: &str, family: &str, year: Option<u16>) -> Reference {
     }
 }
 
+#[allow(dead_code)]
 pub fn add(repo: &Repository, key: &str, reference: &Reference) {
     repo.add(&CitationKey::new(key).unwrap(), reference, None)
         .unwrap();
