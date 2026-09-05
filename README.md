@@ -1,210 +1,447 @@
 # ref
 
-`ref` is a small, Git-like reference manager for scientific writing. The filesystem is its database: each citation has readable YAML metadata and, optionally, one PDF. There is no index, remote service, or opaque database.
+`ref` is a Git-like, CLI-native reference manager for scientific writing. References live inside a project-local `.ref` directory as human-readable YAML metadata with optional PDFs. The filesystem is the database, so a library remains easy to inspect, edit, diff, and version beside a LaTeX thesis or paper.
 
-## Installation and quick start
+## Why `ref`?
 
-Install stable Rust, then run `cargo install --path .` from this checkout.
+`ref` is designed for terminal-centric, project-local writing workflows. It favors readable files and explicit commands over an opaque global database: metadata can be reviewed in Git, source PDFs can live beside it, and BibLaTeX can be generated whenever the document is built. Normal use requires no GUI, account, background service, or network connection; only optional DOI metadata lookup uses the network.
 
-```sh
+## Installation
+
+Install stable Rust, clone this repository, and install the binary from the checkout:
+
+```bash
+cargo install --path .
+```
+
+The package is not documented here as a crates.io, Homebrew, or release-binary distribution because this repository does not currently provide those installation paths.
+
+## Quick start
+
+```bash
+mkdir thesis
 cd thesis
 ref init
-ref add papers/rocchio.pdf
-ref search rocchio
-ref open rocchio1971
-ref export > references.bib
-```
 
-Use the result in LaTeX with `\addbibresource{references.bib}`.
-
-## Repository format
-
-```text
-.ref/
-├── config.yaml
-└── refs/
-    └── rocchio1971/
-        ├── ref.yaml
-        └── paper.pdf
-```
-
-The directory is the citation key; the YAML deliberately has no duplicate `key` field:
-
-```yaml
-type: inproceedings
-title: Relevance Feedback in Information Retrieval
-authors:
-  - given: Joseph J.
-    family: Rocchio
-year: 1971
-container_title: The SMART Retrieval System
-publisher: Prentice Hall
-pages: 313-323
-tags:
-  - information-retrieval
-```
-
-Manual edits and copied reference directories are immediately visible. Commit `.ref` to Git if desired; `ref` never decides whether PDFs belong in version control.
-
-## Commands
-
-| Command | Purpose |
-|---|---|
-| `ref init` | Initialize `.ref` in the current directory |
-| `ref add FILE [flags]` / `ref add --no-pdf` / `ref add --doi DOI` | Add metadata from flags, a PDF, or a DOI |
-| `ref list [--sort key|year|author|title]` | List the collection |
-| `ref search QUERY [--key|--author|--title|--year|--tag]` | Search metadata |
-| `ref show KEY` | Show one exact key |
-| `ref open KEY` | Open its PDF with the native viewer |
-| `ref attach KEY PDF` | Safely attach a source PDF to an existing reference |
-| `ref edit KEY` | Edit YAML using `$VISUAL`, then `$EDITOR` |
-| `ref rename OLD NEW` | Safely rename the reference directory |
-| `ref remove KEY [--yes]` (`ref rm`) | Remove the entire reference |
-| `ref clean [PATH ...] [--dry-run] [--yes]` | Remove references unused in the current-directory scope |
-| `ref export [biblatex] [--output FILE]` | Produce deterministic UTF-8 BibLaTeX |
-| `ref import FILE` | Import a BibTeX/BibLaTeX bibliography without PDFs |
-| `ref doctor [--strict]` | Validate structure, metadata, source availability, DOI syntax, and duplicates |
-
-Run `ref COMMAND --help` for flags. Non-interactive adds require `--title`; `--key` is optional.
-
-`ref add` prompts for missing title, authors, publication year, and citation key when run
-interactively. Primary metadata can instead be provided directly (quote author values that
-contain spaces):
-
-```sh
-ref add ~/Downloads/paper.pdf \
+ref add ~/Downloads/rocchio.pdf \
   --title "Relevance Feedback in Information Retrieval" \
   --author "Joseph J., Rocchio" \
   --year 1971
 
+ref list
+ref search rocchio
+ref open Rocchio1971RelevanceFeedback
+ref export > references.bib
+ref doctor
+```
+
+Use the generated bibliography from LaTeX with, for example, `\addbibresource{references.bib}`.
+
+## How it works
+
+### Repository structure
+
+`ref init` creates `.ref/config.yaml` and `.ref/refs/` in the current directory. It does not initialize Git. A populated project looks like this:
+
+```text
+thesis/
+├── .git/
+├── .ref/
+│   ├── config.yaml
+│   └── refs/
+│       ├── Rocchio1971RelevanceFeedback/
+│       │   ├── ref.yaml
+│       │   └── paper.pdf
+│       └── Smith2024AttentionModels/
+│           └── ref.yaml
+├── thesis.tex
+└── references.bib
+```
+
+The reference directory name is its citation key and canonical identity. `ref.yaml` is authoritative bibliographic metadata; `paper.pdf` is the optional canonical source attachment. A representative metadata file is:
+
+```yaml
+type: article
+title: Example Paper
+authors:
+  - given: Jane
+    family: Smith
+year: 2024
+container_title: Journal of Examples
+publisher: Example Press
+volume: "12"
+issue: "3"
+pages: 10-20
+doi: 10.1234/example
+url: https://example.org
+tags:
+  - recommender-systems
+notes: |
+  Relevant to the methodology section.
+```
+
+These field names are part of the stored format. Manual editing of `.ref/refs/<key>/ref.yaml` is supported, either directly or with `ref edit <key>`; run `ref doctor` afterward to detect many mistakes. Use `ref rename` rather than manually renaming a reference directory.
+
+### Repository discovery
+
+Except for `init`, commands find the nearest `.ref` directory by searching the current directory and then its parents. For example, running this from `thesis/chapters/methods`:
+
+```bash
+ref search rocchio
+```
+
+finds `thesis/.ref`. If repositories are nested, the nearest one wins.
+
+`clean` is intentionally asymmetric: it also discovers `.ref` upward, but searches for citation usage only from the invocation directory downward. See [`ref clean`](#ref-clean) before using it from a subdirectory.
+
+### Citation keys
+
+When `--key` is omitted, a newly added reference gets a creation-time key of the general form:
+
+```text
+<FirstAuthorFamilyName><Year><UpToTwoTitleWords>
+```
+
+`ref` normalizes the first author's complete family name, then prefers the first two title words beginning with uppercase letters. If fewer than two title words are capitalized, it uses the first two usable words instead. For example:
+
+```text
+Author: Joseph J. Rocchio
+Year:   1971
+Title:  Relevance Feedback in Information Retrieval
+Key:    Rocchio1971RelevanceFeedback
+```
+
+Multi-part surnames become PascalCase (`van der Waals` becomes `VanDerWaals`), common Latin diacritics are transliterated (`Müller` becomes `Muller`), and punctuation is removed (`O'Connor` becomes `OConnor`). Collisions receive uppercase alphabetic suffixes such as `A` and `B`.
+
+Automatic generation requires a first author and year. `--key` overrides generation, and imported bibliography keys are preserved. A key is stable after creation: editing title, author, or year never regenerates it. Change identity explicitly with `ref rename`, which does **not** rewrite citations in project source files.
+
+### PDFs and source availability
+
+A reference may exist without a PDF, especially after `ref import`, `ref add --no-pdf`, or DOI lookup. Add one later with `ref attach`. Both `add` and `attach` copy the PDF into the repository without deleting or changing the source, and neither silently overwrites an existing reference attachment.
+
+`ref doctor` reports a missing source PDF as a warning. An empty or non-file `paper.pdf` is an error. `ref doctor --strict` is therefore useful as a final thesis-quality check requiring a canonical local source artifact for every reference.
+
+A PDF indicates only local source availability. Its presence does not establish that it is the correct publication, was read, supports a claim, or is scientifically valid.
+
+### Author syntax
+
+Each author supplied to `add` uses `--author "Given names, Family name"`; repeat the option to preserve multiple authors in order:
+
+```bash
+ref add paper.pdf \
+  --title "Attention Is All You Need" \
+  --author "Ashish, Vaswani" \
+  --author "Noam, Shazeer" \
+  --year 2017
+```
+
+Quote values containing spaces so the shell passes each author as one argument. `--author John,Doe` also parses, but the quoted form is clearer.
+
+## Command reference
+
+| Command | Purpose |
+| --- | --- |
+| `ref init` | Initialize a `.ref` repository |
+| `ref add` | Add a reference with a PDF, without one, or from a DOI |
+| `ref list` | List stored references |
+| `ref search` | Search bibliographic metadata |
+| `ref show` | Show one exact citation key |
+| `ref open` | Open a reference's source PDF |
+| `ref attach` | Attach a PDF to an existing reference |
+| `ref edit` | Edit YAML metadata |
+| `ref rename` | Change a citation key |
+| `ref remove` / `ref rm` | Remove a reference and its files |
+| `ref clean` | Find and remove unused references |
+| `ref import` | Import a BibTeX/BibLaTeX bibliography |
+| `ref export` | Generate BibLaTeX |
+| `ref doctor` | Validate repository health and completeness |
+| `ref help` | Show top-level or command-specific help |
+
+Run `ref <command> --help` (or `ref help <command>`) for complete argument and option help.
+
+### `ref init`
+
+Initialize a reference repository in the current directory:
+
+```bash
+ref init
+```
+
+It creates `.ref/config.yaml` and `.ref/refs/`; it does not create a Git repository.
+
+### `ref add`
+
+Add a reference and optionally copy a source PDF into it:
+
+```bash
+ref add [PDF] [OPTIONS]
+```
+
+With an interactive terminal, omitted title, authors, year, and generated citation key can be prompted for. A non-interactive metadata add requires `--title`. Important options include `--key`, repeatable `--author`, `--year`, `--type`, `--container-title`, `--publisher`, `--doi`, `--url`, comma-separated `--tags`, and `--no-pdf`.
+
+```bash
+# Interactive metadata entry with a PDF
+ref add paper.pdf
+
+# Fully specified PDF reference with multiple authors
 ref add paper.pdf \
   --title "Example Paper" \
   --author "Jane, Smith" \
   --author "John, Doe" \
   --year 2024
 
+# Bibliographic metadata without a PDF
 ref add --no-pdf \
   --title "Online Reference" \
   --author "Jane, Smith" \
   --year 2024
 
-# Retrieve CSL-JSON metadata through doi.org; no PDF is downloaded.
-ref add --doi 10.1038/nrd842
+# Override generated identity
+ref add paper.pdf \
+  --key customKey \
+  --title "Example Paper" \
+  --author "Jane, Smith" \
+  --year 2024
 ```
 
-Each repeatable `--author` uses `Given names, Family name`; `John,Doe` is also
-accepted.
+`ref add --doi 10.1038/nrd842` retrieves CSL-JSON metadata through `doi.org`, creates a reference without a PDF, and requires network access plus a `curl` executable. No PDF is downloaded. If `--doi` is supplied alongside an explicit title, it is stored as manually entered metadata rather than used as the lookup source.
 
-### Citation keys
+### `ref list`
 
-When no explicit `--key` is supplied, `ref` generates a key once, when the
-reference is created, from the first author's complete family name, publication
-year, and up to two title words. It selects the first two words that begin with
-capital letters, falling back to the first two words when fewer than two are
-capitalized. For example, Joseph J. Rocchio, 1971, *Relevance Feedback in
-Information Retrieval* becomes `Rocchio1971RelevanceFeedback`.
+List citation key, year, author, and title. Sort by `key` (the default), `year`, `author`, or `title`:
 
-Generated components are portable ASCII: multi-part names become PascalCase,
-common Latin diacritics are transliterated, punctuation is removed, and uppercase
-acronyms such as `EEG` are retained. A year and first author are required for
-automatic generation; references lacking either can still use an explicit key.
-Collisions receive uppercase alphabetic suffixes (`...`, `...A`, `...B`).
+```bash
+ref list
+ref list --sort year
+ref list --sort author
+```
 
-This convention is not a validity requirement. Explicit keys and bibliography
-keys supplied to `ref import` are preserved exactly, and existing keys are never
-regenerated when metadata is edited. Identity changes only through `ref rename`.
+### `ref search`
 
-DOI lookup requires network access and a `curl` executable, and creates a reference
-without a managed PDF.
-Metadata is requested from `doi.org` using CSL-JSON content negotiation, then stored
-in the same human-readable `.ref/refs/<key>/ref.yaml` file as every other reference.
-You can inspect or edit that YAML normally after the lookup.
+Perform a case-insensitive substring search across citation keys, authors, titles, tags, and years. Results use deterministic relevance and citation-key ordering:
 
-## Importing an existing bibliography
+```bash
+ref search <QUERY>
+ref search rocchio
+ref search "relevance feedback"
+ref search smith --author
+ref search attention --title
+ref search 2024 --year
+ref search eeg --tag
+ref search Rocchio --key
+```
 
-To migrate an existing LaTeX project, initialize a repository beside the document and
-import its bibliography:
+Use at most one of `--key`, `--author`, `--title`, `--year`, or `--tag` per search.
 
-```sh
-cd existing-thesis                 # contains thesis.tex and references.bib
-ref init
+### `ref show`
+
+Show detailed metadata and PDF availability for one exact citation key:
+
+```bash
+ref show Rocchio1971RelevanceFeedback
+```
+
+### `ref open`
+
+Open `.ref/refs/<key>/paper.pdf` in the operating system's default application:
+
+```bash
+ref open Rocchio1971RelevanceFeedback
+```
+
+The command requires an exact citation key and fails if no source PDF is attached.
+
+### `ref attach`
+
+Copy a non-empty PDF onto an existing reference that does not already have one:
+
+```bash
+ref attach Smith2024Attention ~/Downloads/paper.pdf
+```
+
+The canonical destination is `paper.pdf`. The source is untouched, and an existing destination is never overwritten.
+
+### `ref edit`
+
+Open a reference's `ref.yaml` using `$VISUAL`, falling back to `$EDITOR`:
+
+```bash
+ref edit Rocchio1971RelevanceFeedback
+```
+
+`ref` validates the metadata after the editor exits. If validation fails, it reports an error but preserves the edited file so it can be corrected.
+
+### `ref rename`
+
+Change a reference's citation key and directory name:
+
+```bash
+ref rename Smith2024OldTitle Smith2024BetterTitle
+```
+
+Both keys are exact. Existing keys are never overwritten. **Rename does not rewrite `\cite{...}` commands or any other project files**; update those uses yourself.
+
+### `ref remove`
+
+Delete the complete reference directory, including `ref.yaml`, `paper.pdf`, and any other files it contains:
+
+```bash
+ref remove Smith2024Attention
+ref rm Smith2024Attention
+ref remove Smith2024Attention --yes
+```
+
+The command requires confirmation. In non-interactive use, pass `--yes` explicitly.
+
+### `ref clean`
+
+Find citation keys with no textual occurrence in the selected source scope, then remove their complete reference directories:
+
+```bash
+ref clean [PATH ...] [--dry-run] [--yes]
+ref clean --dry-run
+ref clean
+ref clean --yes
+ref clean chapters/
+ref clean introduction.tex chapters/methods/
+```
+
+The repository is discovered upward, but the **scan root is the current directory**, and scanning only moves downward. Optional paths are relative to that directory and can only narrow the scan. Running from a nested directory may classify references used in parent or sibling directories as unused, so preview with `--dry-run` first.
+
+Matching is literal, case-sensitive, and bounded by citation-key characters. An exact occurrence in a comment or plain-text note counts as usage; this conservative rule favors retaining references. `.ref`, `.git`, PDFs, `.bib`, `.bibtex`, binary files, and files covered by the supported repository-root Git ignore rules do not count. If any candidate cannot be inspected completely, deletion is prevented. Without `--yes`, destructive cleanup asks for confirmation.
+
+### `ref import`
+
+Import BibTeX/BibLaTeX records as normal `.ref` references:
+
+```bash
 ref import references.bib
 ```
 
-Bibliography citation keys are preserved, so existing `\cite{...}` commands continue
-to work. Each successful entry is stored using the normal repository format at
-`.ref/refs/<key>/ref.yaml`. PDF and attachment fields are intentionally ignored; import
-never copies or creates `paper.pdf`.
+Citation keys are preserved, the source bibliography is not modified, and attachment fields/PDFs are not imported. Existing citation keys are never overwritten. A structural parse failure occurs before mutation. After successful parsing, invalid or conflicting individual entries are reported and skipped while later entries continue; a partial import exits non-zero.
 
-Import never overwrites an existing key. Conflicting entries are skipped, invalid
-individual entries are reported, and processing continues, so an import may partially
-succeed (with a non-zero status). A malformed bibliography is parsed before any files
-are created and therefore does not partially mutate the repository. The source `.bib`
-file is never modified.
+For an existing thesis:
 
-## Checking source availability
-
-Bibliographic metadata and locally available source material are separate concerns.
-Run `ref doctor` to check both repository integrity and whether every reference has
-the canonical, non-empty `.ref/refs/<key>/paper.pdf` source artifact:
-
-```sh
+```bash
+cd thesis
+ref init
+ref import references.bib
 ref doctor
 ```
 
-A missing source PDF is a warning, so references created by `ref import`,
-`ref add --no-pdf`, or DOI lookup remain valid, searchable, and exportable. Attach a
-PDF later without changing or removing the source file:
+Existing `\cite{...}` uses retain their identities because import preserves keys. `doctor` will identify imported records whose source PDFs are missing.
 
-```sh
-ref attach <key> ~/Downloads/paper.pdf
+### `ref export`
+
+Generate deterministic UTF-8 BibLaTeX ordered by citation key:
+
+```bash
+ref export
+ref export > references.bib
+ref export --output references.bib
 ```
 
-The command never overwrites an existing `paper.pdf`. A zero-byte or non-file
-canonical attachment is an integrity error.
+Only the `biblatex` format is currently supported (and is the default). `--output` writes atomically; stdout supports shell redirection. The authority model is:
 
-Use `ref doctor --strict` as a thesis CI or final-submission quality gate. Strict
-mode exits unsuccessfully for missing source PDFs, as it does for all warnings.
-
-This is a repository-completeness heuristic, not formal provenance. A PDF's
-presence shows only that a source artifact is locally available; it does not show
-that the correct work was attached, read, interpreted correctly, or supports a
-particular claim. Future formats may support other evidence types, but the current
-convention recognizes only `paper.pdf`.
-
-## Removing unused references
-
-Preview cleanup before removing metadata or attached PDFs:
-
-```sh
-ref clean --dry-run
-ref clean                 # asks for confirmation
-ref clean --yes           # explicitly skip confirmation
+```text
+.ref/             authoritative reference data
+references.bib    generated, derived representation
 ```
 
-`clean` is deliberately directory-aware. Although repository discovery searches
-upward for the nearest `.ref`, usage scanning starts at the invocation directory
-and proceeds only downward. Paths further restrict that scope and are resolved
-relative to the invocation directory:
+Do not maintain independent edits in generated `references.bib`; they are lost the next time it is exported.
 
-```sh
-cd chapters/eeg
-ref clean --dry-run
-ref clean -n sections/methods.tex notes.md
+### `ref doctor`
+
+Check repository structure, citation keys, YAML/domain metadata, DOI syntax and duplicates, and source PDF status:
+
+```bash
+ref doctor
+ref doctor --strict
 ```
 
-The summary makes a nested scope explicit because references used in parent or
-sibling directories are not considered. Citation-key occurrences are literal,
-case-sensitive, and token-bounded; comments and plain-text notes count as usage
-to favor retaining a reference. `.bib`, `.bibtex`, PDF, binary, `.ref`, and `.git`
-content is excluded. Common repository-root `.gitignore` and `.git/info/exclude`
-rules (literal paths/directories, `*.extension`, and negation) are respected;
-full Git glob syntax and nested ignore files are not currently interpreted. An
-unreadable or invalid UTF-8 candidate text file makes the scan incomplete and prevents all deletion.
-Use `--dry-run` before destructive cleanup, especially from a subdirectory.
+Diagnostics have two severities:
 
-## Design and limitations
+- **Errors** indicate invalid structure or data, including malformed metadata/DOIs and invalid or empty source PDFs. They return a non-zero status.
+- **Warnings** identify usable but incomplete or suspicious records, including missing authors, years, source PDFs, and duplicate normalized DOIs. A normal run still succeeds when it has only warnings.
+- **Strict mode** makes warnings return a non-zero status too, which is useful in CI and before final submission.
 
-Data safety, predictable behavior, readable YAML, and useful Git diffs take precedence over features. Writes use temporary paths and rename. Collection operations scan metadata, which is intentionally appropriate for thesis-sized libraries.
+## Typical thesis workflow
 
-The MVP has no GUI, cloud sync, database, PDF discovery, attachment import, annotation handling, full-text indexing, citation insertion, or global library. It supports DOI metadata lookup, one optional PDF, local BibTeX/BibLaTeX metadata import, and one BibLaTeX exporter per reference. Cross-reference inheritance, editors, and unsupported fields are not imported; unknown entry types fall back to `misc`.
+1. Add a source and its metadata:
+   ```bash
+   ref add paper.pdf --title "Attention Models" --author "Jane, Smith" --year 2024
+   ```
+2. Find and read it later:
+   ```bash
+   ref search attention
+   ref open Smith2024AttentionModels
+   ```
+3. Cite the stable key in LaTeX:
+   ```latex
+   \cite{Smith2024AttentionModels}
+   ```
+4. Generate the bibliography before compilation:
+   ```bash
+   ref export > references.bib
+   ```
+5. Check routine quality, then apply a strict final gate:
+   ```bash
+   ref doctor
+   ref doctor --strict
+   ```
+6. Review stale references conservatively:
+   ```bash
+   ref clean --dry-run
+   ref clean
+   ```
+
+## Git integration
+
+The `.ref` directory is designed to evolve alongside writing source:
+
+```bash
+git add .ref
+git commit -m "Add references for attention section"
+```
+
+Metadata diffs are readable, citation identity is visible in paths, and no hidden database must be synchronized. Whether to commit `paper.pdf` files is a project decision; `ref` does not automatically add them to `.gitignore`.
+
+## CI and validation
+
+Once the `ref` binary is installed in CI, strict doctor can serve as a completeness gate:
+
+```yaml
+- name: Validate references
+  run: ref doctor --strict
+```
+
+A document build may regenerate derived bibliography output first:
+
+```bash
+ref export > references.bib
+```
+
+## Design principles
+
+The `.ref` filesystem is authoritative, repository operations favor explicit identity and data safety, and generated output is deterministic. Commands compose through stdout, stderr, and exit status. Linear scans are intentional for thesis-sized collections.
+
+## Limitations and non-goals
+
+`ref` manages one optional PDF per reference. It is not a GUI, cloud-sync service, background daemon, PDF reader, annotation manager, opaque database, OCR/full-text index, or claim-verification system. It does not rewrite LaTeX citation keys automatically. Import does not currently implement cross-reference inheritance or editors, and unsupported fields are ignored; unknown entry types are stored as `misc` with a warning.
+
+## Development
+
+Contributor architecture and safety guidance lives in [`AGENTS.md`](AGENTS.md). Run the same checks used by CI:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-targets --all-features
+```
+
+Inspect the CLI locally with:
+
+```bash
+cargo run -- --help
+cargo run -- <command> --help
+```

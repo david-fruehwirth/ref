@@ -49,7 +49,9 @@ impl Editor for SystemEditor {
 #[command(
     name = "ref",
     version,
-    about = "A Git-like reference manager for scientific writing"
+    about = "A Git-like, project-local reference manager for scientific writing",
+    long_about = "A Git-like, project-local reference manager for scientific writing.\n\nref stores human-readable metadata and optional source PDFs in a project-local .ref directory. Run commands anywhere inside the project; ref discovers the nearest repository by searching parent directories.",
+    after_help = "Run `ref <COMMAND> --help` for details about a command."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -58,54 +60,127 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Initialize a reference repository in the current directory
+    #[command(
+        long_about = "Initialize a new reference repository in the current directory.\n\nCreates:\n  .ref/config.yaml\n  .ref/refs/\n\nThis command does not initialize a Git repository.",
+        after_help = "Example:\n  ref init"
+    )]
     Init,
+    /// Add a bibliographic reference, optionally with a source PDF
+    #[command(
+        long_about = "Add a bibliographic reference, optionally with a source PDF.\n\nThe PDF is copied into the repository; the source file is not changed. Without --key, ref generates a citation key from the first author's family name, publication year, and title. Missing metadata is prompted for only when stdin is interactive. Use --doi by itself to retrieve metadata, or --no-pdf to enter metadata without a PDF.",
+        after_help = "Examples:\n  ref add paper.pdf\n  ref add paper.pdf --title \"Example Paper\" --author \"Jane, Smith\" --year 2024\n  ref add --no-pdf --title \"Example Paper\" --author \"Jane, Smith\" --year 2024\n  ref add --doi 10.1234/example"
+    )]
     Add(AddArgs),
+    /// List references in the repository
+    #[command(
+        after_help = "Examples:\n  ref list\n  ref list --sort year\n  ref list --sort author"
+    )]
     List {
+        /// Sort references by citation key, year, first author, or title
         #[arg(long, value_enum, default_value = "key")]
         sort: Sort,
     },
+    /// Search references by key, title, author, year, or tags
+    #[command(
+        long_about = "Search references by citation key, title, author, year, or tags.\n\nMatching is case-insensitive substring search. Results are ordered by relevance and then citation key. Supply at most one field filter.",
+        after_help = "Examples:\n  ref search rocchio\n  ref search \"relevance feedback\"\n  ref search smith --author\n  ref search attention --title\n  ref search eeg --tag"
+    )]
     Search(SearchArgs),
+    /// Show detailed metadata for a reference
+    #[command(
+        long_about = "Show detailed metadata for one reference identified by its exact citation key."
+    )]
     Show {
+        /// Exact citation key to show
         key: String,
     },
+    /// Open a reference's source PDF in the system viewer
+    #[command(
+        long_about = "Open .ref/refs/<KEY>/paper.pdf in the operating system's default application. The command fails when the exact citation key does not exist or has no source PDF."
+    )]
     Open {
+        /// Exact citation key whose source PDF should be opened
         key: String,
     },
     /// Attach a source PDF to an existing reference
+    #[command(
+        long_about = "Attach a source PDF to an existing reference that has no attachment.\n\nThe PDF is copied to .ref/refs/<KEY>/paper.pdf. The source remains untouched, and an existing source PDF is never overwritten.",
+        after_help = "Example:\n  ref attach Smith2024Attention ~/Downloads/paper.pdf"
+    )]
     Attach {
+        /// Exact citation key to receive the source PDF
         key: String,
+        /// PDF file to copy into the reference repository
         pdf: PathBuf,
     },
+    /// Edit a reference's YAML metadata in $VISUAL or $EDITOR
+    #[command(
+        long_about = "Edit a reference's ref.yaml metadata using $VISUAL, falling back to $EDITOR. The exact citation key and edited metadata are validated after the editor exits; invalid user edits are left in place for correction."
+    )]
     Edit {
+        /// Exact citation key to edit
         key: String,
     },
+    /// Rename a reference's citation key
+    #[command(
+        long_about = "Rename a reference's citation key.\n\nThis changes the reference directory and repository identity. It does not rewrite citations in .tex or other project files.",
+        after_help = "Example:\n  ref rename Smith2024OldTitle Smith2024BetterTitle"
+    )]
     Rename {
+        /// Existing exact citation key
         old_key: String,
+        /// New citation key
         new_key: String,
     },
-    #[command(alias = "rm")]
+    /// Remove a reference and its attached files
+    #[command(
+        alias = "rm",
+        long_about = "Remove a reference's entire directory, including ref.yaml, its source PDF, and any other attached files.\n\nThe exact citation key must be confirmed unless --yes is supplied. Non-interactive use requires --yes.",
+        after_help = "Examples:\n  ref remove Smith2024Attention\n  ref rm Smith2024Attention\n  ref remove Smith2024Attention --yes"
+    )]
     Remove {
+        /// Exact citation key to remove
         key: String,
+        /// Skip confirmation and remove the reference immediately
         #[arg(long, short)]
         yes: bool,
     },
-    /// Remove references unused within the current directory scope
+    /// Find and remove references unused in the current source scope
     #[command(
-        long_about = "Remove references unused within the current directory scope.\n\nThe repository is discovered by walking upward, but citation usage is searched only in the current directory and its descendants."
+        long_about = "Find and remove references unused in the current source scope.\n\nThe repository is discovered by searching parent directories, but citation usage is searched only from the current directory downward. Optional paths can narrow, but never expand, that scope. .ref, .git, PDFs, and .bib/.bibtex files are excluded. An incomplete scan prevents deletion. Preview with --dry-run before destructive use.",
+        after_help = "Examples:\n  ref clean --dry-run\n  ref clean\n  ref clean --yes\n  ref clean chapters/\n  ref clean introduction.tex chapters/methods/"
     )]
     Clean(CleanArgs),
+    /// Export references as deterministic BibLaTeX
+    #[command(
+        long_about = "Export repository metadata as deterministic BibLaTeX ordered by citation key.\n\nOutput is written to stdout by default. The .ref repository remains authoritative; exported bibliography files are derived output.",
+        after_help = "Examples:\n  ref export\n  ref export > references.bib\n  ref export --output references.bib"
+    )]
     Export {
+        /// Export format (currently only biblatex)
         #[arg(default_value = "biblatex")]
         format: String,
+        /// Write output atomically to this file instead of stdout
         #[arg(long, short)]
         output: Option<PathBuf>,
     },
-    /// Import references from a BibTeX/BibLaTeX bibliography (PDFs are not imported)
+    /// Import references from a BibTeX/BibLaTeX bibliography
+    #[command(
+        long_about = "Import references from a BibTeX/BibLaTeX bibliography.\n\nCitation keys are preserved, and PDFs are not imported. Existing references are never overwritten. After the file is parsed, invalid or conflicting entries are reported and skipped while later entries continue; any such partial import returns a non-zero status.",
+        after_help = "Example:\n  ref import references.bib"
+    )]
     Import {
         /// BibTeX or BibLaTeX bibliography file
         file: PathBuf,
     },
+    /// Check repository integrity and source completeness
+    #[command(
+        long_about = "Check repository integrity and reference completeness.\n\nValidates repository structure, citation keys, metadata, DOI syntax and duplicates, and source PDFs. Missing authors, years, and source PDFs are warnings; malformed metadata and invalid or empty source PDFs are errors. Warnings do not fail normal doctor runs.",
+        after_help = "Examples:\n  ref doctor\n  ref doctor --strict"
+    )]
     Doctor {
+        /// Treat warnings as failures, returning a non-zero exit status
         #[arg(long)]
         strict: bool,
     },
@@ -129,7 +204,7 @@ struct AddArgs {
     /// Create a reference without an attached PDF
     #[arg(long, conflicts_with = "pdf")]
     no_pdf: bool,
-    /// Citation key (defaults to first-author family name, year, and title)
+    /// Explicit citation key; otherwise generated from author, year, and title
     #[arg(long)]
     key: Option<String>,
     /// Publication title
@@ -141,31 +216,42 @@ struct AddArgs {
     /// Publication year
     #[arg(long, value_parser=parse_year)]
     year: Option<u16>,
+    /// Bibliographic entry type
     #[arg(long = "type", default_value = "article")]
     entry_type: ReferenceType,
+    /// Journal, proceedings, or other containing publication title
     #[arg(long)]
     container_title: Option<String>,
+    /// Publication's publisher
     #[arg(long)]
     publisher: Option<String>,
     /// Retrieve CSL-JSON metadata for this DOI (requires network access; creates no PDF)
     #[arg(long)]
     doi: Option<String>,
+    /// Publication URL
     #[arg(long)]
     url: Option<String>,
+    /// Comma-separated tags; the option may also be repeated
     #[arg(long, value_delimiter = ',')]
     tags: Vec<String>,
 }
 #[derive(Args)]
 struct SearchArgs {
+    /// Case-insensitive substring to find
     query: String,
+    /// Search authors only
     #[arg(long)]
     author: bool,
+    /// Search titles only
     #[arg(long)]
     title: bool,
+    /// Search publication years only
     #[arg(long)]
     year: bool,
+    /// Search tags only
     #[arg(long)]
     tag: bool,
+    /// Search citation keys only
     #[arg(long)]
     key: bool,
 }
