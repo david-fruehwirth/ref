@@ -1,11 +1,15 @@
 use anyhow::{bail, Context, Result};
+mod output;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input};
+use output::{
+    BatchDiagnostic, CommandOutput, DiagnosticOutput, OperationStatus, OutputFormat,
+    ReferenceOutput, WarningOutput,
+};
 use r#ref::{
-    clean::{self, CleanAnalysis},
+    clean,
     doctor::{self, DiagnosticSeverity},
-    export,
-    import::{self, ImportResult},
+    export, import,
     launch::{self, Editor, Environment, FileOpener},
     metadata::{Doi, DoiMetadataClient},
     model::{
@@ -54,6 +58,9 @@ impl Editor for SystemEditor {
     after_help = "Run `ref <COMMAND> --help` for details about a command."
 )]
 struct Cli {
+    /// Emit machine-readable JSON instead of human-readable output
+    #[arg(long, global = true)]
+    json: bool,
     #[command(subcommand)]
     command: Commands,
 }
@@ -305,109 +312,196 @@ fn resolve_year(
         }
     }
 }
-fn repo() -> Result<Repository> {
-    Repository::discover(&env::current_dir()?)
+
+struct Execution {
+    command: &'static str,
+    output: CommandOutput,
+    status: OperationStatus,
+    warnings: Vec<WarningOutput>,
+    exit_code: u8,
+}
+impl Execution {
+    fn success(command: &'static str, output: CommandOutput) -> Self {
+        Self {
+            command,
+            output,
+            status: OperationStatus::Success,
+            warnings: vec![],
+            exit_code: 0,
+        }
+    }
 }
 
 fn main() -> ExitCode {
-    match run() {
-        Ok(code) => ExitCode::from(code),
-        Err(e) => {
-            eprintln!("error: {e:#}");
+    let arguments = env::args_os().collect::<Vec<_>>();
+    let requested_json = arguments.iter().any(|argument| argument == "--json");
+    let parsed_command = arguments
+        .iter()
+        .skip(1)
+        .filter_map(|argument| argument.to_str())
+        .find(|argument| !argument.starts_with('-'))
+        .unwrap_or("ref");
+    let cli = match Cli::try_parse_from(arguments) {
+        Ok(cli) => cli,
+        Err(error) if requested_json => {
+            output::render_error(
+                OutputFormat::Json,
+                parsed_command,
+                &anyhow::anyhow!(error.to_string()),
+            );
+            return ExitCode::from(2);
+        }
+        Err(error) => error.exit(),
+    };
+    let format = if cli.json {
+        OutputFormat::Json
+    } else {
+        OutputFormat::Human
+    };
+    let command = command_name(&cli.command);
+    match execute(cli.command, format) {
+        Ok(done) => match output::render(
+            format,
+            done.command,
+            done.status,
+            &done.warnings,
+            &done.output,
+        ) {
+            Ok(()) => ExitCode::from(done.exit_code),
+            Err(error) => {
+                output::render_error(format, command, &error);
+                ExitCode::from(1)
+            }
+        },
+        Err(error) => {
+            output::render_error(format, command, &error);
             ExitCode::from(1)
         }
     }
 }
-fn run() -> Result<u8> {
-    match Cli::parse().command {
+fn command_name(c: &Commands) -> &'static str {
+    match c {
+        Commands::Init => "init",
+        Commands::Add(_) => "add",
+        Commands::List { .. } => "list",
+        Commands::Search(_) => "search",
+        Commands::Show { .. } => "show",
+        Commands::Open { .. } => "open",
+        Commands::Attach { .. } => "attach",
+        Commands::Edit { .. } => "edit",
+        Commands::Rename { .. } => "rename",
+        Commands::Remove { .. } => "remove",
+        Commands::Clean(_) => "clean",
+        Commands::Export { .. } => "export",
+        Commands::Import { .. } => "import",
+        Commands::Doctor { .. } => "doctor",
+    }
+}
+
+fn execute(command: Commands, format: OutputFormat) -> Result<Execution> {
+    Ok(match command {
         Commands::Init => {
-            let r = Repository::init(&env::current_dir()?)?;
-            println!("Initialized reference repository at {}", r.root().display());
+            let cwd = env::current_dir()?.canonicalize()?;
+            let r = Repository::init(&cwd)?;
+            Execution::success(
+                "init",
+                CommandOutput::Init {
+                    repository_root_path: cwd,
+                    reference_repository_path: r.root().to_path_buf(),
+                    repository_format_version: 1,
+                },
+            )
         }
-        Commands::Add(a) => add(&repo()?, a)?,
+        Commands::Add(a) => add(&repo()?, a, format)?,
         Commands::List { sort } => list(&repo()?, sort)?,
         Commands::Search(a) => search(&repo()?, a)?,
-        Commands::Show { key } => show(&repo()?.load_reference(&CitationKey::new(key)?)?),
-        Commands::Open { key } => open_pdf(&repo()?, key)?,
-        Commands::Attach { key, pdf } => {
-            let key = CitationKey::new(key)?;
-            repo()?.attach(&key, &pdf)?;
-            println!("Attached source PDF to {key}");
+        Commands::Show { key } => {
+            let r = repo()?.load_reference(&CitationKey::new(key)?)?;
+            Execution::success(
+                "show",
+                CommandOutput::Show(ReferenceOutput::from_stored(&r)),
+            )
         }
-        Commands::Edit { key } => edit(&repo()?, key)?,
+        Commands::Open { key } => {
+            let repo = repo()?;
+            let key = CitationKey::new(key)?;
+            let r = repo.load_reference(&key)?;
+            let path = r.path.join("paper.pdf");
+            launch::open_reference(&repo, &key, &SystemOpener)?;
+            Execution::success(
+                "open",
+                CommandOutput::Open {
+                    citation_key: key.to_string(),
+                    source_pdf_path: path,
+                    external_viewer_launch_requested: true,
+                },
+            )
+        }
+        Commands::Attach { key, pdf } => {
+            let repo = repo()?;
+            let key = CitationKey::new(key)?;
+            repo.attach(&key, &pdf)?;
+            Execution::success(
+                "attach",
+                CommandOutput::Attach {
+                    citation_key: key.to_string(),
+                    source_pdf_path: repo.reference_path(&key).join("paper.pdf"),
+                },
+            )
+        }
+        Commands::Edit { key } => {
+            if format == OutputFormat::Json {
+                bail!("edit is unavailable in non-interactive JSON mode")
+            }
+            let repo = repo()?;
+            let key = CitationKey::new(key)?;
+            launch::edit_reference(&repo, &key, &SystemEnvironment, &SystemEditor)?;
+            Execution::success(
+                "edit",
+                CommandOutput::Edit {
+                    citation_key: key.to_string(),
+                    metadata_file_path: repo.reference_path(&key).join("ref.yaml"),
+                    metadata_valid_after_edit: true,
+                },
+            )
+        }
         Commands::Rename { old_key, new_key } => {
+            let repo = repo()?;
             let old = CitationKey::new(old_key)?;
             let new = CitationKey::new(new_key)?;
-            repo()?.rename(&old, &new)?;
-            println!("Renamed {old} → {new}\n\nNote: existing \\cite{{{old}}} references are not updated automatically.");
+            repo.rename(&old, &new)?;
+            let mut e = Execution::success(
+                "rename",
+                CommandOutput::Rename {
+                    previous_citation_key: old.to_string(),
+                    new_citation_key: new.to_string(),
+                    reference_directory_path: repo.reference_path(&new),
+                },
+            );
+            e.warnings.push(WarningOutput {
+                warning_code: "citations_not_rewritten".into(),
+                message: "Existing project citations were not rewritten.".into(),
+                citation_key: Some(old.to_string()),
+            });
+            e
         }
-        Commands::Remove { key, yes } => remove(&repo()?, key, yes)?,
-        Commands::Clean(args) => return clean_cmd(&repo()?, args),
-        Commands::Export { format, output } => export_cmd(&repo()?, &format, output.as_deref())?,
-        Commands::Import { file } => return import_cmd(&repo()?, &file),
-        Commands::Doctor { strict } => return doctor(&repo()?, strict),
-    };
-    Ok(0)
+        Commands::Remove { key, yes } => remove(&repo()?, key, yes, format)?,
+        Commands::Clean(a) => clean_cmd(&repo()?, a, format)?,
+        Commands::Export { format: f, output } => export_cmd(&repo()?, &f, output.as_deref())?,
+        Commands::Import { file } => import_cmd(&repo()?, &file)?,
+        Commands::Doctor { strict } => doctor_cmd(&repo()?, strict)?,
+    })
 }
 
-fn import_cmd(repo: &Repository, path: &Path) -> Result<u8> {
-    if !path.is_file() {
-        bail!(
-            "bibliography `{}` does not exist or is not a regular file",
-            path.display()
-        );
-    }
-    let source =
-        fs::read_to_string(path).with_context(|| format!("failed to read `{}`", path.display()))?;
-    let entries = import::parse_bibliography(&source)
-        .with_context(|| format!("failed to parse `{}`", path.display()))?;
-    let result = import::import_bibliography(repo, entries);
-    print_import_diagnostics(&result);
-    if result.is_complete() {
-        println!(
-            "Imported {} references from {}",
-            result.imported,
-            path.display()
-        );
-    } else {
-        println!(
-            "Import complete with errors.\n\nEntries:  {}\nImported: {}\nSkipped:  {}\nFailed:   {}",
-            result.total,
-            result.imported,
-            result.skipped.len(),
-            result.failed.len()
-        );
-    }
-    Ok(u8::from(!result.is_complete()))
+fn reference_output(repo: &Repository, key: &CitationKey) -> Result<ReferenceOutput> {
+    Ok(ReferenceOutput::from_stored(&repo.load_reference(key)?))
 }
-
-fn print_import_diagnostics(result: &ImportResult) {
-    for diagnostic in &result.skipped {
-        eprintln!(
-            "warning: skipped `{}`\n  {}",
-            diagnostic.key, diagnostic.message
-        );
-    }
-    for diagnostic in &result.failed {
-        eprintln!(
-            "warning: failed to import `{}`\n  {}",
-            diagnostic.key, diagnostic.message
-        );
-    }
-    for diagnostic in &result.warnings {
-        eprintln!("warning: `{}`: {}", diagnostic.key, diagnostic.message);
-    }
-}
-
-fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {
+fn add(repo: &Repository, mut a: AddArgs, format: OutputFormat) -> Result<Execution> {
     if a.no_pdf && a.pdf.is_some() {
         bail!("a PDF and --no-pdf cannot be used together")
     }
-    // With no supplied title, --doi is the metadata source. Retain the established
-    // `--no-pdf --title ... --doi ...` form for manually entered metadata.
     if a.title.is_none() && a.doi.is_some() {
-        let value = a.doi.take().unwrap_or_default();
-        return add_from_doi(repo, &a, value);
+        return add_from_doi(repo, &a, a.doi.clone().unwrap_or_default(), format);
     }
     if !a.no_pdf {
         let p = a
@@ -424,7 +518,7 @@ fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {
             bail!("file must have a .pdf extension")
         }
     }
-    let interactive = io::stdin().is_terminal();
+    let interactive = format == OutputFormat::Human && io::stdin().is_terminal();
     if a.title.is_none() {
         if !interactive {
             bail!("--title is required when stdin is not interactive")
@@ -449,9 +543,6 @@ fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {
             }
         }
     }
-    if a.author.is_empty() {
-        eprintln!("warning: reference has no authors")
-    }
     a.year = resolve_year(a.year, interactive, || {
         Input::new()
             .with_prompt("Year (leave blank if unknown)")
@@ -459,7 +550,6 @@ fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {
             .interact_text()
             .map_err(Into::into)
     })?;
-    let supplied_key = a.key.take();
     let metadata = Reference {
         entry_type: a.entry_type,
         title: a.title.unwrap_or_default(),
@@ -470,71 +560,90 @@ fn add(repo: &Repository, mut a: AddArgs) -> Result<()> {
         volume: None,
         issue: None,
         pages: None,
-        doi: a.doi.map(|value| {
-            value
-                .parse::<Doi>()
-                .map_or(value.clone(), |doi| doi.to_string())
-        }),
+        doi: a
+            .doi
+            .map(|v| v.parse::<Doi>().map_or(v.clone(), |d| d.to_string())),
         url: a.url,
         tags: a.tags,
         notes: None,
     };
-    let key = add_reference(repo, metadata, supplied_key, a.pdf.as_deref(), interactive)?;
-    println!("Added {key}");
-    Ok(())
+    let key = add_reference(repo, metadata, a.key.take(), a.pdf.as_deref(), interactive)?;
+    let out = reference_output(repo, &key)?;
+    let path = repo.reference_path(&key);
+    let mut e = Execution::success(
+        "add",
+        CommandOutput::Add {
+            created_reference: out,
+            reference_directory_path: path,
+        },
+    );
+    if repo.load_reference(&key)?.metadata.authors.is_empty() {
+        e.warnings.push(WarningOutput {
+            warning_code: "missing_authors".into(),
+            message: "Reference has no authors.".into(),
+            citation_key: Some(key.to_string()),
+        });
+    }
+    Ok(e)
 }
-
-fn add_from_doi(repo: &Repository, args: &AddArgs, value: String) -> Result<()> {
+fn add_from_doi(
+    repo: &Repository,
+    args: &AddArgs,
+    value: String,
+    format: OutputFormat,
+) -> Result<Execution> {
     let doi: Doi = value.parse()?;
     if let Some(existing) = find_doi(repo, &doi)? {
-        bail!("DOI already exists\n\n{doi} is already stored as `{existing}`");
+        bail!("DOI already exists\n\n{doi} is already stored as `{existing}`")
     }
-    eprintln!("Retrieving metadata for DOI {doi}...");
+    if format == OutputFormat::Human {
+        eprintln!("Retrieving metadata for DOI {doi}...");
+    }
     let client = match env::var("REF_DOI_RESOLVER") {
-        Ok(resolver) => {
-            DoiMetadataClient::with_resolver(&resolver, std::time::Duration::from_secs(15))?
-        }
+        Ok(r) => DoiMetadataClient::with_resolver(&r, std::time::Duration::from_secs(15))?,
         Err(_) => DoiMetadataClient::new()?,
     };
-    let mut metadata = client.lookup(&doi)?;
-    metadata.tags = args.tags.clone();
-    let key = add_reference(repo, metadata, args.key.clone(), None, false)?;
-    println!("Added {key}");
-    Ok(())
+    let mut m = client.lookup(&doi)?;
+    m.tags = args.tags.clone();
+    let key = add_reference(repo, m, args.key.clone(), None, false)?;
+    Ok(Execution::success(
+        "add",
+        CommandOutput::Add {
+            created_reference: reference_output(repo, &key)?,
+            reference_directory_path: repo.reference_path(&key),
+        },
+    ))
 }
-
 fn find_doi(repo: &Repository, sought: &Doi) -> Result<Option<CitationKey>> {
-    for stored in repo.load_all()? {
-        if stored
-            .metadata
+    for r in repo.load_all()? {
+        if r.metadata
             .doi
             .as_deref()
-            .and_then(|value| value.parse::<Doi>().ok())
-            .is_some_and(|doi| &doi == sought)
+            .and_then(|v| v.parse::<Doi>().ok())
+            .is_some_and(|d| &d == sought)
         {
-            return Ok(Some(stored.key));
+            return Ok(Some(r.key));
         }
     }
     Ok(None)
 }
-
 fn add_reference(
     repo: &Repository,
     metadata: Reference,
-    supplied_key: Option<String>,
+    supplied: Option<String>,
     pdf: Option<&Path>,
     interactive: bool,
 ) -> Result<CitationKey> {
     metadata.validate()?;
-    let key = match supplied_key {
-        Some(key) => key,
+    let key = match supplied {
+        Some(k) => k,
         None => {
             let base = generated_key(&metadata)?.to_string();
             let mut proposed = base.clone();
-            let mut collision = 0;
+            let mut n = 0;
             while repo.contains(&CitationKey::new(&proposed)?) {
-                collision += 1;
-                proposed = format!("{base}{}", alphabetical_suffix(collision));
+                n += 1;
+                proposed = format!("{base}{}", alphabetical_suffix(n));
             }
             if interactive {
                 Input::new()
@@ -550,30 +659,16 @@ fn add_reference(
     repo.add(&key, &metadata, pdf)?;
     Ok(key)
 }
-
-fn alphabetical_suffix(mut number: usize) -> String {
-    let mut suffix = String::new();
-    while number > 0 {
-        number -= 1;
-        suffix.insert(0, (b'A' + (number % 26) as u8) as char);
-        number /= 26;
+fn alphabetical_suffix(mut n: usize) -> String {
+    let mut s = String::new();
+    while n > 0 {
+        n -= 1;
+        s.insert(0, (b'A' + (n % 26) as u8) as char);
+        n /= 26;
     }
-    suffix
+    s
 }
-
-fn table(items: &[StoredReference]) {
-    println!("{:<20} {:<6} {:<22} TITLE", "KEY", "YEAR", "AUTHOR");
-    for r in items {
-        println!(
-            "{:<20} {:<6} {:<22} {}",
-            r.key,
-            r.metadata.year.map_or("-".into(), |y| y.to_string()),
-            display_author(&r.metadata.authors),
-            r.metadata.title
-        )
-    }
-}
-fn list(repo: &Repository, sort: Sort) -> Result<()> {
+fn list(repo: &Repository, sort: Sort) -> Result<Execution> {
     let mut rs = repo.load_all()?;
     rs.sort_by(|a, b| match sort {
         Sort::Key => a.key.cmp(&b.key),
@@ -593,8 +688,17 @@ fn list(repo: &Repository, sort: Sort) -> Result<()> {
             .cmp(&b.metadata.title.to_lowercase())
             .then(a.key.cmp(&b.key)),
     });
-    table(&rs);
-    Ok(())
+    let references = rs
+        .iter()
+        .map(ReferenceOutput::from_stored)
+        .collect::<Vec<_>>();
+    Ok(Execution::success(
+        "list",
+        CommandOutput::List {
+            reference_count: references.len(),
+            references,
+        },
+    ))
 }
 fn rank(r: &StoredReference, q: &str, a: &SearchArgs) -> Option<u8> {
     let key = r.key.as_str().to_lowercase();
@@ -648,7 +752,7 @@ fn rank(r: &StoredReference, q: &str, a: &SearchArgs) -> Option<u8> {
         None
     }
 }
-fn search(repo: &Repository, a: SearchArgs) -> Result<()> {
+fn search(repo: &Repository, a: SearchArgs) -> Result<Execution> {
     if [a.author, a.title, a.year, a.tag, a.key]
         .into_iter()
         .filter(|x| *x)
@@ -658,69 +762,46 @@ fn search(repo: &Repository, a: SearchArgs) -> Result<()> {
         bail!("only one search field filter may be used")
     };
     let q = a.query.to_lowercase();
-    let mut found: Vec<_> = repo
+    let mut found = repo
         .load_all()?
         .into_iter()
         .filter_map(|r| rank(&r, &q, &a).map(|n| (n, r)))
-        .collect();
+        .collect::<Vec<_>>();
     found.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.key.cmp(&b.1.key)));
-    table(&found.into_iter().map(|x| x.1).collect::<Vec<_>>());
-    Ok(())
+    let refs = found
+        .iter()
+        .map(|x| ReferenceOutput::from_stored(&x.1))
+        .collect::<Vec<_>>();
+    let field = if a.author {
+        "author"
+    } else if a.title {
+        "title"
+    } else if a.year {
+        "year"
+    } else if a.tag {
+        "tag"
+    } else if a.key {
+        "citation_key"
+    } else {
+        "all"
+    };
+    Ok(Execution::success(
+        "search",
+        CommandOutput::Search {
+            search_query: a.query,
+            search_field: field.into(),
+            matching_reference_count: refs.len(),
+            matching_references: refs,
+        },
+    ))
 }
-
-fn show(r: &StoredReference) {
-    let m = &r.metadata;
-    println!(
-        "Key:       {}\nType:      {}\nTitle:     {}",
-        r.key, m.entry_type, m.title
-    );
-    println!(
-        "Authors:   {}",
-        m.authors
-            .iter()
-            .map(|a| format!("{} {}", a.given, a.family))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    if let Some(v) = m.year {
-        println!("Year:      {v}")
-    }
-    for (n, v) in [
-        ("Container", &m.container_title),
-        ("Publisher", &m.publisher),
-        ("Volume", &m.volume),
-        ("Issue", &m.issue),
-        ("Pages", &m.pages),
-        ("DOI", &m.doi),
-        ("URL", &m.url),
-    ] {
-        if let Some(v) = v {
-            println!("{n}: {v}")
-        }
-    }
-    if !m.tags.is_empty() {
-        println!("Tags:      {}", m.tags.join(", "))
-    }
-    println!("PDF:       {}", if r.has_pdf { "yes" } else { "no" });
-    if let Some(n) = &m.notes {
-        println!("\nNotes:\n{n}")
-    }
-}
-fn open_pdf(repo: &Repository, key: String) -> Result<()> {
-    launch::open_reference(repo, &CitationKey::new(key)?, &SystemOpener)
-}
-fn edit(repo: &Repository, key: String) -> Result<()> {
-    let key = CitationKey::new(key)?;
-    launch::edit_reference(repo, &key, &SystemEnvironment, &SystemEditor)?;
-    println!("Updated {key}");
-    Ok(())
-}
-fn remove(repo: &Repository, key: String, yes: bool) -> Result<()> {
+fn remove(repo: &Repository, key: String, yes: bool, format: OutputFormat) -> Result<Execution> {
     let key = CitationKey::new(key)?;
     let r = repo.load_reference(&key)?;
-    let confirmed = if yes {
-        true
-    } else if io::stdin().is_terminal() {
+    if !yes {
+        if format == OutputFormat::Json || !io::stdin().is_terminal() {
+            bail!("confirmation required; use --yes in non-interactive mode")
+        }
         println!(
             "{}\n{}\n{}\n{}\n",
             r.key,
@@ -733,203 +814,281 @@ fn remove(repo: &Repository, key: String, yes: bool) -> Result<()> {
             r.metadata.title,
             r.metadata.year.map_or("-".into(), |x| x.to_string())
         );
-        Confirm::new()
+        if !Confirm::new()
             .with_prompt("Remove this reference and its PDF?")
             .default(false)
             .interact()?
-    } else {
-        bail!("confirmation required; use --yes in non-interactive mode")
-    };
-    if confirmed {
-        repo.remove(&key)?;
-        println!("Removed {key}")
+        {
+            return Ok(Execution::success(
+                "remove",
+                CommandOutput::Remove {
+                    removed_citation_key: key.to_string(),
+                    reference_removed: false,
+                    source_pdf_removed: false,
+                },
+            ));
+        }
     }
-    Ok(())
+    let had = r.has_pdf;
+    repo.remove(&key)?;
+    Ok(Execution::success(
+        "remove",
+        CommandOutput::Remove {
+            removed_citation_key: key.to_string(),
+            reference_removed: true,
+            source_pdf_removed: had,
+        },
+    ))
 }
-
-fn clean_cmd(repo: &Repository, args: CleanArgs) -> Result<u8> {
-    // Avoid an unnecessary project traversal for an empty collection.
-    if repo.load_all()?.is_empty() {
-        println!("Nothing to clean.");
-        return Ok(0);
-    }
+fn clean_cmd(repo: &Repository, args: CleanArgs, format: OutputFormat) -> Result<Execution> {
     let cwd = env::current_dir()?.canonicalize()?;
     let analysis = clean::analyze(repo, &cwd, &args.paths)?;
-    print_clean_analysis(&analysis, args.dry_run);
-
+    let total = analysis.used.len() + analysis.unused.len();
+    let unused = analysis
+        .unused
+        .iter()
+        .map(ReferenceOutput::from_stored)
+        .collect::<Vec<_>>();
     if !analysis.scan_errors.is_empty() {
-        eprintln!("\nerror: clean scan incomplete\n\nCould not inspect:");
-        for error in &analysis.scan_errors {
-            eprintln!("  {}: {}", error.path.display(), error.message);
+        bail!(
+            "clean scan incomplete: {}",
+            analysis
+                .scan_errors
+                .iter()
+                .map(|e| format!("{}: {}", e.path.display(), e.message))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    }
+    if !args.dry_run && !analysis.unused.is_empty() && !args.yes {
+        if format == OutputFormat::Json || !io::stdin().is_terminal() {
+            bail!("confirmation required; use --yes in non-interactive mode")
         }
-        eprintln!("\nNo references were removed.");
-        return Ok(1);
-    }
-    if analysis.unused.is_empty() {
-        println!("\nNothing to clean.");
-        return Ok(0);
-    }
-    if args.dry_run {
-        println!("\nDry run: no references were removed.");
-        return Ok(0);
-    }
-    if analysis.files_scanned == 0 {
-        eprintln!("warning: no eligible text files were found in the clean scope\n\nAll references would appear unused.");
-    }
-    let project_root = repo.root().parent().unwrap_or(repo.root());
-    if analysis.scan_root != project_root {
-        eprintln!("warning: clean is scoped to the current directory\n\nRepository:\n  {}\n\nScan scope:\n  {}\n\nReferences used outside this directory are not considered.\n", project_root.display(), analysis.scan_root.display());
-    }
-    if !args.yes {
-        println!("\n{} unused references found.\n\nThis will remove the reference metadata and any attached PDFs.", analysis.unused.len());
         print!("\nRemove these references? [y/N] ");
         io::stdout().flush()?;
         let mut response = String::new();
         io::stdin().read_line(&mut response)?;
         if !matches!(response.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-            println!("Cleanup cancelled. No references were removed.");
-            return Ok(0);
+            return Ok(Execution::success(
+                "clean",
+                CommandOutput::Clean {
+                    dry_run: false,
+                    repository_root_path: analysis.repository_root,
+                    scan_root_path: analysis.scan_root,
+                    eligible_files_scanned: analysis.files_scanned,
+                    reference_count: total,
+                    used_reference_count: analysis.used.len(),
+                    unused_reference_count: analysis.unused.len(),
+                    unused_references: unused,
+                    references_removed: vec![],
+                    failed_references: vec![],
+                },
+            ));
         }
     }
-    let mut removed = 0;
-    let mut failures = Vec::new();
-    for reference in &analysis.unused {
-        match repo.remove(&reference.key) {
-            Ok(()) => removed += 1,
-            Err(error) => failures.push((&reference.key, error)),
-        }
-    }
-    println!("Removed {removed} unused references.");
-    if failures.is_empty() {
-        return Ok(0);
-    }
-    eprintln!("\nFailed to remove:");
-    for (key, error) in failures {
-        eprintln!("  {key}: {error:#}");
-    }
-    Ok(1)
-}
-
-fn print_clean_analysis(analysis: &CleanAnalysis, dry_run: bool) {
-    println!(
-        "Repository:\n  {}\n\nScan root:\n  {}",
-        analysis.repository_root.display(),
-        analysis.scan_root.display()
-    );
-    if analysis.scan_root
-        != analysis
-            .repository_root
-            .parent()
-            .unwrap_or(&analysis.repository_root)
-    {
-        println!("\nNote: files outside this directory were not considered.");
-    }
-    println!(
-        "\nFiles scanned: {}\nReferences:    {}\nUsed:          {}\nUnused:        {}",
-        analysis.files_scanned,
-        analysis.used.len() + analysis.unused.len(),
-        analysis.used.len(),
-        analysis.unused.len()
-    );
-    if analysis.files_scanned == 0 {
-        println!("\nwarning: no eligible text files were found in the clean scope\nAll references would appear unused.");
-    }
-    if !analysis.unused.is_empty() {
-        println!(
-            "\n{}:",
-            if analysis.scan_errors.is_empty() {
-                if dry_run {
-                    "Would remove"
-                } else {
-                    "Unused references"
-                }
-            } else {
-                "Tentative unused references"
+    let mut removed = vec![];
+    let mut failed = vec![];
+    if !args.dry_run {
+        for r in &analysis.unused {
+            match repo.remove(&r.key) {
+                Ok(()) => removed.push(r.key.to_string()),
+                Err(e) => failed.push(BatchDiagnostic {
+                    citation_key: r.key.to_string(),
+                    diagnostic_code: "remove_failed".into(),
+                    message: format!("{e:#}"),
+                }),
             }
-        );
-        for reference in &analysis.unused {
-            println!("\n  {}\n    {}", reference.key, reference.metadata.title);
         }
     }
+    let partial = !failed.is_empty();
+    Ok(Execution {
+        command: "clean",
+        output: CommandOutput::Clean {
+            dry_run: args.dry_run,
+            repository_root_path: analysis.repository_root,
+            scan_root_path: analysis.scan_root,
+            eligible_files_scanned: analysis.files_scanned,
+            reference_count: total,
+            used_reference_count: analysis.used.len(),
+            unused_reference_count: analysis.unused.len(),
+            unused_references: unused,
+            references_removed: removed,
+            failed_references: failed,
+        },
+        status: if partial {
+            OperationStatus::PartialSuccess
+        } else {
+            OperationStatus::Success
+        },
+        warnings: vec![],
+        exit_code: u8::from(partial),
+    })
 }
-fn export_cmd(repo: &Repository, format: &str, output: Option<&Path>) -> Result<()> {
+fn export_cmd(repo: &Repository, format: &str, path: Option<&Path>) -> Result<Execution> {
     if format != "biblatex" {
         bail!("unsupported export format `{format}`")
-    };
-    let data = export::biblatex(&repo.load_all()?);
-    if let Some(path) = output {
-        let parent = path.parent().unwrap_or(Path::new("."));
+    }
+    let refs = repo.load_all()?;
+    let data = export::biblatex(&refs);
+    let (content, out, written) = if let Some(path) = path {
+        let absolute = absolute_path(path)?;
+        let parent = absolute.parent().unwrap_or(Path::new("."));
         let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
         tmp.write_all(data.as_bytes())?;
-        tmp.persist(path).map_err(|e| e.error)?;
+        tmp.persist(&absolute).map_err(|e| e.error)?;
+        (None, Some(absolute), true)
     } else {
-        print!("{data}")
-    }
-    Ok(())
-}
-
-fn doctor(repo: &Repository, strict: bool) -> Result<u8> {
-    let report = doctor::inspect(repo)?;
-    let warnings = report
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Warning)
-        .collect::<Vec<_>>();
-    let errors = report
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
-        .collect::<Vec<_>>();
-    println!("Repository: {}\n\n✓ configuration valid\n✓ {} references discovered\n✓ {} metadata files parsed\n{} {} / {} references have source PDFs", repo.root().display(), report.references_total, report.metadata_parsed, if report.references_without_source_pdf == 0 && errors.iter().all(|d| !matches!(d, r#ref::doctor::DoctorDiagnostic::InvalidSourcePdf { .. })) { "✓" } else { "!" }, report.references_with_source_pdf, report.references_total);
-    if !warnings.is_empty() {
-        println!("\nWarnings:");
-        for w in &warnings {
-            println!("  {}", w.message())
-        }
-    }
-    if !errors.is_empty() {
-        println!("\nErrors:");
-        for e in &errors {
-            println!("  {}", e.message())
-        }
-    }
-    println!(
-        "\n{} references, {} warnings, {} errors",
-        report.references_total,
-        report.warning_count(),
-        report.error_count()
-    );
-    Ok(u8::from(
-        !errors.is_empty() || (strict && !warnings.is_empty()),
+        (Some(data), None, false)
+    };
+    Ok(Execution::success(
+        "export",
+        CommandOutput::Export {
+            export_format: "biblatex".into(),
+            reference_count: refs.len(),
+            bibliography_content: content,
+            output_file_path: out,
+            bibliography_written_to_file: written,
+        },
     ))
+}
+fn import_cmd(repo: &Repository, path: &Path) -> Result<Execution> {
+    if !path.is_file() {
+        bail!(
+            "bibliography `{}` does not exist or is not a regular file",
+            path.display()
+        )
+    }
+    let absolute = absolute_path(path)?;
+    let source =
+        fs::read_to_string(path).with_context(|| format!("failed to read `{}`", path.display()))?;
+    let entries = import::parse_bibliography(&source)
+        .with_context(|| format!("failed to parse `{}`", path.display()))?;
+    let keys = entries.iter().map(|e| e.key.clone()).collect::<Vec<_>>();
+    let result = import::import_bibliography(repo, entries);
+    let imported = keys
+        .into_iter()
+        .filter(|k| {
+            !result
+                .skipped
+                .iter()
+                .chain(result.failed.iter())
+                .any(|d| d.key == *k)
+        })
+        .collect();
+    let convert = |d: &import::ImportDiagnostic| BatchDiagnostic {
+        citation_key: d.key.clone(),
+        diagnostic_code: format!("{:?}", d.kind).to_ascii_lowercase(),
+        message: d.message.clone(),
+    };
+    let skipped = result.skipped.iter().map(convert).collect::<Vec<_>>();
+    let failed = result.failed.iter().map(convert).collect::<Vec<_>>();
+    let partial = !result.is_complete();
+    let warnings = result
+        .warnings
+        .iter()
+        .map(|d| WarningOutput {
+            warning_code: "unsupported_reference_type".into(),
+            message: d.message.clone(),
+            citation_key: Some(d.key.clone()),
+        })
+        .collect();
+    Ok(Execution {
+        command: "import",
+        output: CommandOutput::Import {
+            input_bibliography_path: absolute,
+            entries_found: result.total,
+            references_imported: result.imported,
+            references_skipped: skipped.len(),
+            references_failed: failed.len(),
+            imported_citation_keys: imported,
+            skipped_references: skipped,
+            failed_references: failed,
+        },
+        status: if partial {
+            OperationStatus::PartialSuccess
+        } else {
+            OperationStatus::Success
+        },
+        warnings,
+        exit_code: u8::from(partial),
+    })
+}
+fn doctor_cmd(repo: &Repository, strict: bool) -> Result<Execution> {
+    let report = doctor::inspect(repo)?;
+    let diagnostics = report
+        .diagnostics
+        .iter()
+        .map(|d| {
+            let severity = match d.severity() {
+                DiagnosticSeverity::Warning => "warning",
+                DiagnosticSeverity::Error => "error",
+            };
+            let message = d.message();
+            let citation_key = message
+                .split(':')
+                .next()
+                .filter(|s| !s.contains(' '))
+                .map(str::to_owned);
+            DiagnosticOutput {
+                severity: severity.into(),
+                diagnostic_code: doctor_code(d).into(),
+                citation_key,
+                message,
+            }
+        })
+        .collect();
+    let failed = report.error_count() > 0 || (strict && report.warning_count() > 0);
+    Ok(Execution {
+        command: "doctor",
+        output: CommandOutput::Doctor {
+            repository_root_path: repo.root().to_path_buf(),
+            reference_count: report.references_total,
+            references_with_source_pdf: report.references_with_source_pdf,
+            references_without_source_pdf: report.references_without_source_pdf,
+            warning_count: report.warning_count(),
+            error_count: report.error_count(),
+            strict_mode: strict,
+            diagnostics,
+        },
+        status: if failed {
+            OperationStatus::Failure
+        } else {
+            OperationStatus::Success
+        },
+        warnings: vec![],
+        exit_code: u8::from(failed),
+    })
+}
+fn doctor_code(d: &r#ref::doctor::DoctorDiagnostic) -> &'static str {
+    use r#ref::doctor::DoctorDiagnostic::*;
+    match d {
+        InvalidCitationKey { .. } => "invalid_citation_key",
+        MissingMetadata { .. } => "missing_metadata",
+        InvalidMetadata { .. } => "invalid_metadata",
+        MissingYear { .. } => "missing_publication_year",
+        MissingAuthors { .. } => "missing_authors",
+        MalformedDoi { .. } => "malformed_doi",
+        DuplicateDoi { .. } => "duplicate_doi",
+        MissingSourcePdf { .. } => "missing_source_pdf",
+        InvalidSourcePdf { .. } => "invalid_source_pdf",
+    }
+}
+fn absolute_path(path: &Path) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        Ok(env::current_dir()?.join(path))
+    }
 }
 
 #[cfg(test)]
 mod add_tests {
     use super::*;
-
     #[test]
-    fn interactive_year_is_collected_and_invalid_input_is_retried() {
-        let mut answers = ["not-a-year", "2024"].into_iter();
-        let year = resolve_year(None, true, || Ok(answers.next().unwrap().to_owned())).unwrap();
-        let reference = Reference {
-            entry_type: ReferenceType::Article,
-            title: "Example".into(),
-            authors: vec![],
-            year,
-            container_title: None,
-            publisher: None,
-            volume: None,
-            issue: None,
-            pages: None,
-            doi: None,
-            url: None,
-            tags: vec![],
-            notes: None,
-        };
-        assert_eq!(reference.year, Some(2024));
+    fn suffixes() {
+        assert_eq!(alphabetical_suffix(1), "A");
+        assert_eq!(alphabetical_suffix(27), "AA");
     }
-
     #[test]
     fn supplied_year_never_prompts() {
         let year = resolve_year(Some(1971), true, || bail!("unexpected prompt")).unwrap();

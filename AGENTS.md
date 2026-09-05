@@ -356,6 +356,10 @@ launch.rs: injected viewer/editor/environment boundaries
 - **CLI/application (`main.rs`)** parses arguments, resolves prompts, formats
   output, and maps results to statuses. Bibliography conversion does not belong
   here.
+- **Output (`output.rs`)** centrally renders typed semantic command results as
+  human text or a versioned JSON envelope. Commands return semantic result
+  objects. New commands must use this output interface and must not implement
+  their own JSON formatting.
 - **Domain (`model.rs`)** owns references, structured people, types, keys, key
   generation, and validation. It MUST NOT depend on terminal behavior.
 - **Repository (`repository.rs`)** owns discovery, paths, structure validation,
