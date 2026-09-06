@@ -89,6 +89,68 @@ fn maps_entry_types_and_date() {
 }
 
 #[test]
+fn imports_all_canonical_types_aliases_and_mixed_case_types() {
+    let (_temp, repo) = initialized();
+    let cases = [
+        ("article", ReferenceType::Article),
+        ("book", ReferenceType::Book),
+        ("mvbook", ReferenceType::Mvbook),
+        ("inbook", ReferenceType::Inbook),
+        ("bookinbook", ReferenceType::Bookinbook),
+        ("suppbook", ReferenceType::Suppbook),
+        ("booklet", ReferenceType::Booklet),
+        ("collection", ReferenceType::Collection),
+        ("mvcollection", ReferenceType::Mvcollection),
+        ("incollection", ReferenceType::Incollection),
+        ("suppcollection", ReferenceType::Suppcollection),
+        ("dataset", ReferenceType::Dataset),
+        ("manual", ReferenceType::Manual),
+        ("misc", ReferenceType::Misc),
+        ("online", ReferenceType::Online),
+        ("patent", ReferenceType::Patent),
+        ("periodical", ReferenceType::Periodical),
+        ("suppperiodical", ReferenceType::Suppperiodical),
+        ("proceedings", ReferenceType::Proceedings),
+        ("mvproceedings", ReferenceType::Mvproceedings),
+        ("inproceedings", ReferenceType::Inproceedings),
+        ("reference", ReferenceType::Reference),
+        ("mvreference", ReferenceType::Mvreference),
+        ("inreference", ReferenceType::Inreference),
+        ("report", ReferenceType::Report),
+        ("set", ReferenceType::Set),
+        ("software", ReferenceType::Software),
+        ("thesis", ReferenceType::Thesis),
+        ("unpublished", ReferenceType::Unpublished),
+        ("xdata", ReferenceType::Xdata),
+        ("conference", ReferenceType::Inproceedings),
+        ("electronic", ReferenceType::Online),
+        ("www", ReferenceType::Online),
+        ("mastersthesis", ReferenceType::Thesis),
+        ("phdthesis", ReferenceType::Thesis),
+        ("techreport", ReferenceType::Report),
+        ("Article", ReferenceType::Article),
+        ("PhDThesis", ReferenceType::Thesis),
+        ("UNPUBLISHED", ReferenceType::Unpublished),
+        ("TECHREPORT", ReferenceType::Report),
+    ];
+    let bib = cases.iter().enumerate().map(|(i, (kind, _))| format!(
+        "@{kind}{{type{i}, author={{Doe, Jane}}, title={{Work in Progress}}, note={{Unpublished manuscript}}}}"
+    )).collect::<Vec<_>>().join("\n");
+
+    let entries = parse_bibliography(&format!("@COMMENT{{ignored entry}}\n{bib}")).unwrap();
+    assert_eq!(entries.len(), cases.len());
+    let result = import_bibliography(&repo, entries);
+    assert_eq!(result.imported, cases.len());
+    assert!(result.warnings.is_empty());
+    for (i, (_, expected)) in cases.iter().enumerate() {
+        let stored = repo
+            .load_reference(&CitationKey::new(format!("type{i}")).unwrap())
+            .unwrap();
+        assert_eq!(&stored.metadata.entry_type, expected);
+    }
+}
+
+#[test]
 fn partial_failures_conflicts_and_unknown_types_are_structured() {
     let (_temp, repo) = initialized();
     let first =
@@ -100,7 +162,7 @@ fn partial_failures_conflicts_and_unknown_types_are_structured() {
 @article{bad key, author={Smith, Jane}, title={Bad}}
 @article{missing, author={Smith, Jane}}
 @article{existing, author={New, Person}, title={Overwrite}}
-@dataset{good-c, author={{World Health Organization}}, title={C}}
+@customa{good-c, author={{World Health Organization}}, title={C}}
 @article{good-a, author={Other, Person}, title={Duplicate}}
 "#;
     let result = import_bibliography(&repo, parse_bibliography(bib).unwrap());
@@ -109,6 +171,10 @@ fn partial_failures_conflicts_and_unknown_types_are_structured() {
     assert_eq!(result.failed.len(), 2);
     assert_eq!(result.skipped.len(), 2);
     assert_eq!(result.warnings.len(), 1);
+    assert_eq!(
+        result.warnings[0].message,
+        "unsupported type `customa`; imported as `misc`"
+    );
     assert!(result
         .failed
         .iter()

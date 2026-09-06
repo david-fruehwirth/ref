@@ -38,14 +38,111 @@ impl fmt::Display for CitationKey {
 pub enum ReferenceType {
     Article,
     Book,
+    Mvbook,
     Inbook,
+    Bookinbook,
+    Suppbook,
+    Booklet,
+    Collection,
+    Mvcollection,
     Incollection,
-    Inproceedings,
-    Proceedings,
-    Thesis,
-    Report,
+    Suppcollection,
+    Dataset,
+    Manual,
     Misc,
     Online,
+    Patent,
+    Periodical,
+    Suppperiodical,
+    Proceedings,
+    Mvproceedings,
+    Inproceedings,
+    Reference,
+    Mvreference,
+    Inreference,
+    Report,
+    Set,
+    Software,
+    Thesis,
+    Unpublished,
+    Xdata,
+}
+
+/// The result of resolving a BibTeX/BibLaTeX entry type.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResolvedReferenceType {
+    Canonical(ReferenceType),
+    Alias {
+        raw: String,
+        canonical: ReferenceType,
+    },
+    Unknown(String),
+}
+
+impl ResolvedReferenceType {
+    pub fn canonical(&self) -> Option<ReferenceType> {
+        match self {
+            Self::Canonical(kind)
+            | Self::Alias {
+                canonical: kind, ..
+            } => Some(*kind),
+            Self::Unknown(_) => None,
+        }
+    }
+}
+
+/// Resolve standard entry types and compatibility aliases case-insensitively.
+///
+/// This is the single entry-type boundary shared by bibliography import and
+/// string-based domain inputs. Unknown values are retained for diagnostics.
+pub fn resolve_entry_type(raw: &str) -> ResolvedReferenceType {
+    use ReferenceType::*;
+
+    let canonical = match raw.to_ascii_lowercase().as_str() {
+        "article" => Article,
+        "book" => Book,
+        "mvbook" => Mvbook,
+        "inbook" => Inbook,
+        "bookinbook" => Bookinbook,
+        "suppbook" => Suppbook,
+        "booklet" => Booklet,
+        "collection" => Collection,
+        "mvcollection" => Mvcollection,
+        "incollection" => Incollection,
+        "suppcollection" => Suppcollection,
+        "dataset" => Dataset,
+        "manual" => Manual,
+        "misc" => Misc,
+        "online" => Online,
+        "patent" => Patent,
+        "periodical" => Periodical,
+        "suppperiodical" => Suppperiodical,
+        "proceedings" => Proceedings,
+        "mvproceedings" => Mvproceedings,
+        "inproceedings" => Inproceedings,
+        "reference" => Reference,
+        "mvreference" => Mvreference,
+        "inreference" => Inreference,
+        "report" => Report,
+        "set" => Set,
+        "software" => Software,
+        "thesis" => Thesis,
+        "unpublished" => Unpublished,
+        "xdata" => Xdata,
+        "conference" => return alias(raw, Inproceedings),
+        "electronic" | "www" => return alias(raw, Online),
+        "mastersthesis" | "phdthesis" => return alias(raw, Thesis),
+        "techreport" => return alias(raw, Report),
+        _ => return ResolvedReferenceType::Unknown(raw.to_owned()),
+    };
+    ResolvedReferenceType::Canonical(canonical)
+}
+
+fn alias(raw: &str, canonical: ReferenceType) -> ResolvedReferenceType {
+    ResolvedReferenceType::Alias {
+        raw: raw.to_owned(),
+        canonical,
+    }
 }
 
 impl fmt::Display for ReferenceType {
@@ -58,7 +155,9 @@ impl fmt::Display for ReferenceType {
 impl FromStr for ReferenceType {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self> {
-        serde_yaml::from_str(s).map_err(|_| anyhow::anyhow!("unknown reference type `{s}`"))
+        resolve_entry_type(s)
+            .canonical()
+            .ok_or_else(|| anyhow::anyhow!("unknown reference type `{s}`"))
     }
 }
 
@@ -311,5 +410,24 @@ mod tests {
     #[test]
     fn unknown_type() {
         assert!("journall".parse::<ReferenceType>().is_err());
+    }
+
+    #[test]
+    fn entry_type_resolver_distinguishes_canonical_alias_and_unknown() {
+        assert_eq!(
+            resolve_entry_type("Article"),
+            ResolvedReferenceType::Canonical(ReferenceType::Article)
+        );
+        assert_eq!(
+            resolve_entry_type("PhDThesis"),
+            ResolvedReferenceType::Alias {
+                raw: "PhDThesis".into(),
+                canonical: ReferenceType::Thesis,
+            }
+        );
+        assert_eq!(
+            resolve_entry_type("CustomResearch"),
+            ResolvedReferenceType::Unknown("CustomResearch".into())
+        );
     }
 }

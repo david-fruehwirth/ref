@@ -6,7 +6,9 @@
 //! string macros.  Conversion and persistence are separate from parsing.
 
 use crate::{
-    model::{CitationKey, Person, Reference, ReferenceType},
+    model::{
+        resolve_entry_type, CitationKey, Person, Reference, ReferenceType, ResolvedReferenceType,
+    },
     repository::Repository,
 };
 use anyhow::{anyhow, bail, Context, Result};
@@ -132,20 +134,14 @@ fn diag(key: String, kind: DiagnosticKind, message: impl Into<String>) -> Import
 }
 
 fn convert(entry: &BibEntry) -> Result<(Reference, Option<String>)> {
-    let (entry_type, warning) = match entry.entry_type.to_ascii_lowercase().as_str() {
-        "article" => (ReferenceType::Article, None),
-        "book" => (ReferenceType::Book, None),
-        "inbook" => (ReferenceType::Inbook, None),
-        "incollection" => (ReferenceType::Incollection, None),
-        "inproceedings" | "conference" => (ReferenceType::Inproceedings, None),
-        "proceedings" => (ReferenceType::Proceedings, None),
-        "thesis" | "phdthesis" | "mastersthesis" => (ReferenceType::Thesis, None),
-        "report" | "techreport" => (ReferenceType::Report, None),
-        "online" => (ReferenceType::Online, None),
-        "misc" => (ReferenceType::Misc, None),
-        other => (
+    let (entry_type, warning) = match resolve_entry_type(&entry.entry_type) {
+        ResolvedReferenceType::Canonical(kind)
+        | ResolvedReferenceType::Alias {
+            canonical: kind, ..
+        } => (kind, None),
+        ResolvedReferenceType::Unknown(raw) => (
             ReferenceType::Misc,
-            Some(format!("unsupported type `{other}`; imported as `misc`")),
+            Some(format!("unsupported type `{raw}`; imported as `misc`")),
         ),
     };
     let field = |name: &str| entry.fields.get(name).map(|s| s.trim().to_owned());
@@ -314,7 +310,7 @@ impl<'a> Parser<'a> {
         let mut entries = Vec::new();
         while self.skip_to_at() {
             self.bump();
-            let kind = self.identifier()?.to_ascii_lowercase();
+            let kind = self.identifier()?;
             self.space();
             let open = self
                 .bump()
@@ -324,7 +320,7 @@ impl<'a> Parser<'a> {
                 b'(' => b')',
                 _ => return self.error("expected `{` or `(` after entry type"),
             };
-            match kind.as_str() {
+            match kind.to_ascii_lowercase().as_str() {
                 "comment" | "preamble" => self.skip_balanced(open, close)?,
                 "string" => self.parse_string(close)?,
                 _ => entries.push(self.parse_entry(kind, close)?),
