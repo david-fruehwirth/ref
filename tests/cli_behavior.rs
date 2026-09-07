@@ -173,6 +173,64 @@ fn core_subcommand_help_explains_options_and_safety_semantics() {
         .stdout(predicate::str::contains("never overwritten"));
 }
 
+// Scenario: every documented command exposes scoped help without repository access.
+// Requirement: REQ-064
+#[test]
+fn every_documented_command_exposes_scoped_help() {
+    let temp = tempfile::tempdir().unwrap();
+    for command in [
+        "add", "attach", "list", "search", "show", "open", "edit", "rename", "remove", "clean",
+        "import", "export", "doctor",
+    ] {
+        support::command(temp.path())
+            .args([command, "--help"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Usage:"))
+            .stderr(predicate::str::is_empty());
+    }
+}
+
+// Scenario: export stdout is an uncontaminated bibliography suitable for redirection.
+// Requirements: REQ-050, REQ-066
+#[test]
+fn export_stdout_contains_only_bibliography_content() {
+    let temp = tempfile::tempdir().unwrap();
+    support::command(temp.path()).arg("init").assert().success();
+    support::command(temp.path())
+        .args(["add", "--no-pdf", "--key", "eeg2024", "--title", "EEG"])
+        .assert()
+        .success();
+
+    let output = support::command(temp.path())
+        .arg("export")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.starts_with("@article{eeg2024,"));
+    assert!(!stdout.contains("Exported"));
+}
+
+// Scenario: rename keeps its result on stdout and its citation warning on stderr.
+// Requirement: REQ-066
+#[test]
+fn rename_separates_result_from_warning() {
+    let temp = tempfile::tempdir().unwrap();
+    support::command(temp.path()).arg("init").assert().success();
+    support::command(temp.path())
+        .args(["add", "--no-pdf", "--key", "old", "--title", "EEG"])
+        .assert()
+        .success();
+    support::command(temp.path())
+        .args(["rename", "old", "new"])
+        .assert()
+        .success()
+        .stdout(predicate::eq("Renamed old → new\n"))
+        .stderr(predicate::str::contains("citations were not rewritten"));
+}
+
 // Scenario: cli wires init add list search show rename remove and export.
 // Requirement: REQ-065
 #[test]
