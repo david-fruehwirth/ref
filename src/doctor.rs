@@ -149,8 +149,8 @@ pub fn inspect(repo: &Repository) -> Result<DoctorReport> {
                 continue;
             }
         };
-        let metadata: Reference = match serde_yaml::from_str(&text) {
-            Ok(metadata) => metadata,
+        let metadata: Reference = match crate::repository::parse_reference_yaml(&text) {
+            Ok((metadata, _)) => metadata,
             Err(error) => {
                 report.diagnostics.push(DoctorDiagnostic::InvalidMetadata {
                     key: key.to_string(),

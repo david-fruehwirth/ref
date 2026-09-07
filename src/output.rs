@@ -189,6 +189,11 @@ pub struct ReferenceOutput {
     pub source_pdf_path: Option<PathBuf>,
 }
 
+#[derive(Clone, Serialize)]
+pub struct RecentReferenceOutput {
+    pub citation_key: String,
+}
+
 impl ReferenceOutput {
     pub fn from_stored(r: &r#ref::repository::StoredReference) -> Self {
         let m = &r.metadata;
@@ -235,6 +240,9 @@ pub enum CommandOutput {
     List {
         reference_count: usize,
         references: Vec<ReferenceOutput>,
+    },
+    Last {
+        references: Vec<RecentReferenceOutput>,
     },
     Search {
         search_query: String,
@@ -341,6 +349,11 @@ impl HumanRenderable for CommandOutput {
                 matching_references: references,
                 ..
             } => table(w, references)?,
+            Self::Last { references } => {
+                for reference in references {
+                    writeln!(w, "{}", reference.citation_key)?;
+                }
+            }
             Self::Show(r) => show(w, r)?,
             Self::Open { .. } => (),
             Self::Attach { citation_key, .. } => {

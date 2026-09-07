@@ -96,6 +96,7 @@ mod tests {
             key: CitationKey::new(key).unwrap(),
             path: PathBuf::new(),
             has_pdf: false,
+            added_at: None,
             metadata: Reference {
                 entry_type: ReferenceType::Article,
                 title: "A & B".into(),

@@ -373,3 +373,30 @@ relevant context.
 ### REQ-068: Non-interactive JSON removal
 
 JSON-mode removal shall require explicit `--yes` confirmation rather than prompt.
+
+## Recently added references
+
+### REQ-069: Persisted reference creation time
+
+Every successfully created reference shall store an unambiguous UTC `added_at`
+timestamp in its versioned `ref.yaml` state through the shared repository creation
+path. Existing references without this property shall remain valid, and rename or
+other non-creation operations shall preserve it.
+
+### REQ-070: Recently added query
+
+`ref last` shall return up to the requested positive number of references having
+persisted creation metadata, ordered by `added_at` descending and citation key
+ascending for ties. It shall exclude legacy references without `added_at`, and an
+empty result shall succeed silently.
+
+### REQ-071: Plain last output
+
+Human-readable `ref last` output shall contain exactly one citation key per line,
+without headers, labels, timestamps, or explanatory text.
+
+### REQ-072: Structured last output
+
+JSON `ref last` output shall use the common versioned success envelope and expose
+the selected references as objects containing `citation_key`, without exposing
+their creation timestamps.

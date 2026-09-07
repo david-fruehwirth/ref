@@ -29,6 +29,7 @@ fn stored(key: &str) -> StoredReference {
         metadata,
         path: PathBuf::new(),
         has_pdf: false,
+        added_at: None,
     }
 }
 
