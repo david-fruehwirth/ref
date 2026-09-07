@@ -4,7 +4,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input};
 use output::{
     BatchDiagnostic, CommandOutput, DiagnosticOutput, OperationStatus, OutputFormat,
-    ReferenceOutput, WarningOutput,
+    RecentReferenceOutput, ReferenceOutput, WarningOutput,
 };
 use r#ref::{
     clean,
@@ -87,6 +87,16 @@ enum Commands {
         /// Sort references by citation key, year, first author, or title
         #[arg(long, value_enum, default_value = "key")]
         sort: Sort,
+    },
+    /// Print recently added citation keys
+    #[command(
+        long_about = "Print citation keys for the references most recently added to this repository.",
+        after_help = "Examples:\n  ref last\n  ref last -n 5\n  ref last | pbcopy"
+    )]
+    Last {
+        /// Number of citation keys to print
+        #[arg(short = 'n', long = "number", default_value_t = 1, value_parser = parse_positive, allow_hyphen_values = true)]
+        number: usize,
     },
     /// Search references by key, title, author, year, or tags
     #[command(
@@ -293,6 +303,16 @@ fn parse_year(s: &str) -> std::result::Result<u16, String> {
     Ok(year)
 }
 
+fn parse_positive(s: &str) -> std::result::Result<usize, String> {
+    let number = s
+        .parse::<usize>()
+        .map_err(|_| format!("invalid positive integer `{s}`"))?;
+    if number == 0 {
+        return Err("value must be a positive integer".into());
+    }
+    Ok(number)
+}
+
 fn resolve_year(
     supplied: Option<u16>,
     interactive: bool,
@@ -389,6 +409,7 @@ fn command_name(c: &Commands) -> &'static str {
         Commands::Init => "init",
         Commands::Add(_) => "add",
         Commands::List { .. } => "list",
+        Commands::Last { .. } => "last",
         Commands::Search(_) => "search",
         Commands::Show { .. } => "show",
         Commands::Open { .. } => "open",
@@ -419,6 +440,16 @@ fn execute(command: Commands, format: OutputFormat) -> Result<Execution> {
         }
         Commands::Add(a) => add(&repo()?, a, format)?,
         Commands::List { sort } => list(&repo()?, sort)?,
+        Commands::Last { number } => {
+            let references = repo()?
+                .recent_references(number)?
+                .into_iter()
+                .map(|reference| RecentReferenceOutput {
+                    citation_key: reference.key.to_string(),
+                })
+                .collect();
+            Execution::success("last", CommandOutput::Last { references })
+        }
         Commands::Search(a) => search(&repo()?, a)?,
         Commands::Show { key } => {
             let r = repo()?.load_reference(&CitationKey::new(key)?)?;
