@@ -1089,11 +1089,15 @@ fn absolute_path(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod add_tests {
     use super::*;
+    // Scenario: generated-key collision numbers become alphabetic suffixes.
+    // Requirement: REQ-012
     #[test]
     fn suffixes() {
         assert_eq!(alphabetical_suffix(1), "A");
         assert_eq!(alphabetical_suffix(27), "AA");
     }
+    // Scenario: add does not prompt for a year when one was supplied.
+    // Requirement: REQ-020
     #[test]
     fn supplied_year_never_prompts() {
         let year = resolve_year(Some(1971), true, || bail!("unexpected prompt")).unwrap();

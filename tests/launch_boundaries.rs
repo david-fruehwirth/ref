@@ -45,6 +45,8 @@ impl Editor for RecordingEditor {
     }
 }
 
+// Scenario: open requests the references pdf without launching a desktop app.
+// Requirement: REQ-024
 #[test]
 fn open_requests_the_references_pdf_without_launching_a_desktop_app() {
     let temp = tempfile::tempdir().unwrap();
@@ -72,6 +74,8 @@ fn open_requests_the_references_pdf_without_launching_a_desktop_app() {
         .contains("failed to open"));
 }
 
+// Scenario: open does not invoke opener for missing pdf or key.
+// Requirement: REQ-025
 #[test]
 fn open_does_not_invoke_opener_for_missing_pdf_or_key() {
     let temp = tempfile::tempdir().unwrap();
@@ -88,6 +92,8 @@ fn open_does_not_invoke_opener_for_missing_pdf_or_key() {
     assert!(opener.0.borrow().is_empty());
 }
 
+// Scenario: edit prefers visual and targets metadata without global environment mutation.
+// Requirement: REQ-026
 #[test]
 fn edit_prefers_visual_and_targets_metadata_without_global_environment_mutation() {
     let temp = tempfile::tempdir().unwrap();
@@ -113,6 +119,8 @@ fn edit_prefers_visual_and_targets_metadata_without_global_environment_mutation(
     );
 }
 
+// Scenario: edit requires configuration and preserves invalid user edits.
+// Requirement: REQ-027
 #[test]
 fn edit_requires_configuration_and_preserves_invalid_user_edits() {
     struct InvalidatingEditor;

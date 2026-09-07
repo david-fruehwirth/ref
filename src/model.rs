@@ -373,6 +373,8 @@ pub fn display_author(authors: &[Person]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Scenario: citation keys accept safe components and reject unsafe ones.
+    // Requirement: REQ-005
     #[test]
     fn keys() {
         for k in ["foo", "A.b-c_2"] {
@@ -382,6 +384,8 @@ mod tests {
             assert!(CitationKey::new(k).is_err());
         }
     }
+    // Scenario: Deterministic citation-key generation from reference metadata.
+    // Requirement: REQ-012
     #[test]
     fn generation() {
         let reference = Reference {
@@ -407,11 +411,15 @@ mod tests {
             "Rocchio1971RelevanceFeedback"
         );
     }
+    // Scenario: unknown stored reference-type names are rejected.
+    // Requirement: REQ-009
     #[test]
     fn unknown_type() {
         assert!("journall".parse::<ReferenceType>().is_err());
     }
 
+    // Scenario: entry type resolver distinguishes canonical alias and unknown.
+    // Requirements: REQ-044, REQ-045, REQ-046, REQ-047
     #[test]
     fn entry_type_resolver_distinguishes_canonical_alias_and_unknown() {
         assert_eq!(

@@ -8,6 +8,8 @@ fn cmd(dir: &std::path::Path) -> Command {
     c
 }
 
+// Scenario: no pdf workflow and export.
+// Requirements: REQ-016, REQ-050, REQ-065
 #[test]
 fn no_pdf_workflow_and_export() {
     let t = tempfile::tempdir().unwrap();
@@ -50,6 +52,8 @@ fn no_pdf_workflow_and_export() {
     assert!(!t.path().join(".ref/refs/smith2025").exists());
 }
 
+// Scenario: pdf is copied and duplicate rejected.
+// Requirements: REQ-006, REQ-015
 #[test]
 fn pdf_is_copied_and_duplicate_rejected() {
     let t = tempfile::tempdir().unwrap();
@@ -77,6 +81,8 @@ fn pdf_is_copied_and_duplicate_rejected() {
         .stderr(predicate::str::contains("already exists"));
 }
 
+// Scenario: doctor strict treats warning as failure.
+// Requirements: REQ-053, REQ-056
 #[test]
 fn doctor_strict_treats_warning_as_failure() {
     let t = tempfile::tempdir().unwrap();
@@ -98,6 +104,8 @@ fn doctor_strict_treats_warning_as_failure() {
     cmd(t.path()).args(["doctor", "--strict"]).assert().code(1);
 }
 
+// Scenario: attach copies without overwriting and resolves doctor warning.
+// Requirements: REQ-019, REQ-053
 #[test]
 fn attach_copies_without_overwriting_and_resolves_doctor_warning() {
     let t = tempfile::tempdir().unwrap();
