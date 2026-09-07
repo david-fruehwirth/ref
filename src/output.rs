@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::Serialize;
-use std::{io::Write, path::PathBuf};
+use std::{io::IsTerminal, io::Write, path::PathBuf};
 
 pub const SCHEMA_VERSION: u8 = 1;
 
@@ -55,6 +55,10 @@ pub struct ErrorOutput {
 pub trait HumanRenderable {
     fn render_human(&self, writer: &mut dyn Write) -> Result<()>;
 
+    fn render_human_with_color(&self, writer: &mut dyn Write, _color: bool) -> Result<()> {
+        self.render_human(writer)
+    }
+
     fn render_human_stderr(&self, _writer: &mut dyn Write) -> Result<()> {
         Ok(())
     }
@@ -73,7 +77,8 @@ pub fn render<T: Serialize + HumanRenderable>(
                 eprintln!("warning: {}", warning.message);
             }
             value.render_human_stderr(&mut std::io::stderr())?;
-            value.render_human(&mut std::io::stdout())
+            let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+            value.render_human_with_color(&mut std::io::stdout(), color)
         }
         OutputFormat::Json => {
             serde_json::to_writer_pretty(
@@ -348,7 +353,7 @@ impl HumanRenderable for CommandOutput {
             | Self::Search {
                 matching_references: references,
                 ..
-            } => table(w, references)?,
+            } => reference_summaries(w, references, false)?,
             Self::Last { references } => {
                 for reference in references {
                     writeln!(w, "{}", reference.citation_key)?;
@@ -476,6 +481,17 @@ impl HumanRenderable for CommandOutput {
         Ok(())
     }
 
+    fn render_human_with_color(&self, w: &mut dyn Write, color: bool) -> Result<()> {
+        match self {
+            Self::List { references, .. }
+            | Self::Search {
+                matching_references: references,
+                ..
+            } => reference_summaries(w, references, color),
+            _ => self.render_human(w),
+        }
+    }
+
     fn render_human_stderr(&self, w: &mut dyn Write) -> Result<()> {
         match self {
             Self::Import {
@@ -512,23 +528,54 @@ impl HumanRenderable for CommandOutput {
     }
 }
 
-fn table(w: &mut dyn Write, rs: &[ReferenceOutput]) -> Result<()> {
-    writeln!(w, "{:<20} {:<6} {:<22} TITLE", "KEY", "YEAR", "AUTHOR")?;
-    for r in rs {
-        let author = r.authors.first().map_or("-".into(), |a| {
-            format!("{}, {}", a.family_name, a.given_names)
-        });
-        writeln!(
-            w,
-            "{:<20} {:<6} {:<22} {}",
-            r.citation_key,
-            r.publication_year.map_or("-".into(), |y| y.to_string()),
-            author,
-            r.title
-        )?;
+fn reference_summaries(
+    w: &mut dyn Write,
+    references: &[ReferenceOutput],
+    color: bool,
+) -> Result<()> {
+    for (index, reference) in references.iter().enumerate() {
+        if index > 0 {
+            writeln!(w)?;
+        }
+        styled_line(w, &reference.citation_key, "1;36", color)?;
+        summary_field(w, "Title:", &reference.title, color)?;
+        if !reference.authors.is_empty() {
+            let authors = reference
+                .authors
+                .iter()
+                .map(|author| format!("{} {}", author.given_names, author.family_name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            summary_field(w, "Authors:", &authors, color)?;
+        }
+        if let Some(year) = reference.publication_year {
+            summary_field(w, "Year:", &year.to_string(), color)?;
+        }
+        summary_field(w, "Type:", &reference.reference_type, color)?;
     }
     Ok(())
 }
+
+fn styled_line(w: &mut dyn Write, value: &str, style: &str, color: bool) -> Result<()> {
+    if color {
+        writeln!(w, "\x1b[{style}m{value}\x1b[0m")?;
+    } else {
+        writeln!(w, "{value}")?;
+    }
+    Ok(())
+}
+
+fn summary_field(w: &mut dyn Write, label: &str, value: &str, color: bool) -> Result<()> {
+    write!(w, "    ")?;
+    if color {
+        write!(w, "\x1b[36m{label:<9}\x1b[0m")?;
+    } else {
+        write!(w, "{label:<9}")?;
+    }
+    writeln!(w, "{value}")?;
+    Ok(())
+}
+
 fn show(w: &mut dyn Write, r: &ReferenceOutput) -> Result<()> {
     writeln!(
         w,
@@ -572,4 +619,42 @@ fn show(w: &mut dyn Write, r: &ReferenceOutput) -> Result<()> {
         writeln!(w, "\nNotes:\n{n}")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod reference_summary_tests {
+    use super::*;
+
+    fn reference() -> ReferenceOutput {
+        ReferenceOutput {
+            citation_key: "Smith2024".into(),
+            reference_type: "article".into(),
+            title: "Attention".into(),
+            authors: vec![],
+            publication_year: None,
+            container_title: None,
+            publisher: None,
+            volume: None,
+            issue: None,
+            pages: None,
+            doi: None,
+            url: None,
+            tags: vec![],
+            notes: None,
+            source_pdf_present: false,
+            source_pdf_path: None,
+        }
+    }
+
+    // Scenario: explicit color styling emphasizes summary keys and labels only.
+    // Requirement: REQ-074
+    #[test]
+    fn color_enabled_summary_styles_semantic_elements() {
+        let mut output = Vec::new();
+        reference_summaries(&mut output, &[reference()], true).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.starts_with("\x1b[1;36mSmith2024\x1b[0m\n"));
+        assert!(output.contains("    \x1b[36mTitle:   \x1b[0mAttention\n"));
+        assert!(output.contains("    \x1b[36mType:    \x1b[0marticle\n"));
+    }
 }

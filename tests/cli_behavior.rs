@@ -306,6 +306,35 @@ fn cli_wires_init_add_list_search_show_rename_remove_and_export() {
     assert!(!temp.path().join(".ref/refs/smith2025").exists());
 }
 
+// Scenario: list and search share readable, redirect-safe reference blocks.
+// Requirements: REQ-021, REQ-022, REQ-066, REQ-073, REQ-074
+#[test]
+fn list_and_search_render_the_same_ordered_reference_blocks() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = r#ref::repository::Repository::init(temp.path()).unwrap();
+    let mut first = support::sample("Études of Attention", "Núñez", Some(2024));
+    first.authors.push(r#ref::model::Person {
+        given: "Zoë".into(),
+        family: "李".into(),
+    });
+    support::add(&repo, "Alpha2024", &first);
+    let mut second = support::sample("Attention Without Dates", "", None);
+    second.authors.clear();
+    support::add(&repo, "Beta", &second);
+
+    let expected = "Alpha2024\n    Title:   Études of Attention\n    Authors: Jane Núñez, Zoë 李\n    Year:    2024\n    Type:    article\n\nBeta\n    Title:   Attention Without Dates\n    Type:    article\n";
+    for args in [vec!["list"], vec!["search", "attention"]] {
+        support::command(temp.path())
+            .args(args)
+            .assert()
+            .success()
+            .stdout(predicate::eq(expected))
+            .stdout(predicate::str::contains("\x1b[").not())
+            .stdout(predicate::str::contains("KEY ").not())
+            .stderr(predicate::str::is_empty());
+    }
+}
+
 // Scenario: cli rejects missing pdf duplicate key and unknown reference without partial state.
 // Requirements: REQ-006, REQ-018, REQ-023
 #[test]
