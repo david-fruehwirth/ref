@@ -4,7 +4,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input};
 use output::{
     BatchDiagnostic, CommandOutput, DiagnosticOutput, OperationStatus, OutputFormat,
-    ReferenceOutput, WarningOutput,
+    RecentReferenceOutput, ReferenceOutput, WarningOutput,
 };
 use r#ref::{
     clean,
@@ -88,6 +88,16 @@ enum Commands {
         #[arg(long, value_enum, default_value = "key")]
         sort: Sort,
     },
+    /// Print recently added citation keys
+    #[command(
+        long_about = "Print citation keys for the references most recently added to this repository.",
+        after_help = "Examples:\n  ref last\n  ref last -n 5\n  ref last | pbcopy"
+    )]
+    Last {
+        /// Number of citation keys to print
+        #[arg(short = 'n', long = "number", default_value_t = 1, value_parser = parse_positive, allow_hyphen_values = true)]
+        number: usize,
+    },
     /// Search references by key, title, author, year, or tags
     #[command(
         long_about = "Search references by citation key, title, author, year, or tags.\n\nMatching is case-insensitive substring search. Results are ordered by relevance and then citation key. Supply at most one field filter.",
@@ -155,7 +165,7 @@ enum Commands {
     },
     /// Find and remove references unused in the current source scope
     #[command(
-        long_about = "Find and remove references unused in the current source scope.\n\nThe repository is discovered by searching parent directories, but citation usage is searched only from the current directory downward. Optional paths can narrow, but never expand, that scope. .ref, .git, PDFs, and .bib/.bibtex files are excluded. An incomplete scan prevents deletion. Preview with --dry-run before destructive use.",
+        long_about = "Find and remove references unused in the current source scope.\n\nThe repository is discovered by searching parent directories, but citation usage is searched only from the current directory downward. Optional paths can narrow, but never expand, that scope. .ref, .git, PDFs, and .bib/.bibtex files are excluded. An incomplete scan prevents deletion. Preview with --dry-run; destructive use requires confirmation or --yes.",
         after_help = "Examples:\n  ref clean --dry-run\n  ref clean\n  ref clean --yes\n  ref clean chapters/\n  ref clean introduction.tex chapters/methods/"
     )]
     Clean(CleanArgs),
@@ -293,6 +303,16 @@ fn parse_year(s: &str) -> std::result::Result<u16, String> {
     Ok(year)
 }
 
+fn parse_positive(s: &str) -> std::result::Result<usize, String> {
+    let number = s
+        .parse::<usize>()
+        .map_err(|_| format!("invalid positive integer `{s}`"))?;
+    if number == 0 {
+        return Err("value must be a positive integer".into());
+    }
+    Ok(number)
+}
+
 fn resolve_year(
     supplied: Option<u16>,
     interactive: bool,
@@ -389,6 +409,7 @@ fn command_name(c: &Commands) -> &'static str {
         Commands::Init => "init",
         Commands::Add(_) => "add",
         Commands::List { .. } => "list",
+        Commands::Last { .. } => "last",
         Commands::Search(_) => "search",
         Commands::Show { .. } => "show",
         Commands::Open { .. } => "open",
@@ -419,6 +440,16 @@ fn execute(command: Commands, format: OutputFormat) -> Result<Execution> {
         }
         Commands::Add(a) => add(&repo()?, a, format)?,
         Commands::List { sort } => list(&repo()?, sort)?,
+        Commands::Last { number } => {
+            let references = repo()?
+                .recent_references(number)?
+                .into_iter()
+                .map(|reference| RecentReferenceOutput {
+                    citation_key: reference.key.to_string(),
+                })
+                .collect();
+            Execution::success("last", CommandOutput::Last { references })
+        }
         Commands::Search(a) => search(&repo()?, a)?,
         Commands::Show { key } => {
             let r = repo()?.load_reference(&CitationKey::new(key)?)?;
@@ -807,7 +838,7 @@ fn remove(repo: &Repository, key: String, yes: bool, format: OutputFormat) -> Re
         if format == OutputFormat::Json || !io::stdin().is_terminal() {
             bail!("confirmation required; use --yes in non-interactive mode")
         }
-        println!(
+        eprintln!(
             "{}\n{}\n{}\n{}\n",
             r.key,
             r.metadata
@@ -869,8 +900,8 @@ fn clean_cmd(repo: &Repository, args: CleanArgs, format: OutputFormat) -> Result
         if format == OutputFormat::Json {
             bail!("confirmation required; use --yes in non-interactive mode")
         }
-        print!("\nRemove these references? [y/N] ");
-        io::stdout().flush()?;
+        eprint!("\nRemove these references? [y/N] ");
+        io::stderr().flush()?;
         let mut response = String::new();
         io::stdin().read_line(&mut response)?;
         if !matches!(response.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
@@ -906,6 +937,15 @@ fn clean_cmd(repo: &Repository, args: CleanArgs, format: OutputFormat) -> Result
         }
     }
     let partial = !failed.is_empty();
+    let warnings = if analysis.files_scanned == 0 {
+        vec![WarningOutput {
+            warning_code: "empty_clean_scope".into(),
+            message: "no eligible text files were found in the clean scope; all references would appear unused".into(),
+            citation_key: None,
+        }]
+    } else {
+        vec![]
+    };
     Ok(Execution {
         command: "clean",
         output: CommandOutput::Clean {
@@ -925,7 +965,7 @@ fn clean_cmd(repo: &Repository, args: CleanArgs, format: OutputFormat) -> Result
         } else {
             OperationStatus::Success
         },
-        warnings: vec![],
+        warnings,
         exit_code: u8::from(partial),
     })
 }
@@ -1089,11 +1129,15 @@ fn absolute_path(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod add_tests {
     use super::*;
+    // Scenario: generated-key collision numbers become alphabetic suffixes.
+    // Requirement: REQ-012
     #[test]
     fn suffixes() {
         assert_eq!(alphabetical_suffix(1), "A");
         assert_eq!(alphabetical_suffix(27), "AA");
     }
+    // Scenario: add does not prompt for a year when one was supplied.
+    // Requirement: REQ-020
     #[test]
     fn supplied_year_never_prompts() {
         let year = resolve_year(Some(1971), true, || bail!("unexpected prompt")).unwrap();

@@ -22,6 +22,8 @@ fn setup() -> (tempfile::TempDir, Repository) {
     (temp, repo)
 }
 
+// Scenario: root scan excludes bibliographies repository git and binary content.
+// Requirement: REQ-032
 #[test]
 fn root_scan_excludes_bibliographies_repository_git_and_binary_content() {
     let (temp, _) = setup();
@@ -43,6 +45,8 @@ fn root_scan_excludes_bibliographies_repository_git_and_binary_content() {
     assert!(temp.path().join(".ref/refs/UnusedReference").is_dir());
 }
 
+// Scenario: nested scan never searches parents or siblings and honors boundaries.
+// Requirements: REQ-031, REQ-033
 #[test]
 fn nested_scan_never_searches_parents_or_siblings_and_honors_boundaries() {
     let (temp, _) = setup();
@@ -65,6 +69,8 @@ fn nested_scan_never_searches_parents_or_siblings_and_honors_boundaries() {
         .stdout(predicate::str::contains("RootReference"));
 }
 
+// Scenario: path scopes union and cannot escape invocation directory.
+// Requirement: REQ-034
 #[test]
 fn path_scopes_union_and_cannot_escape_invocation_directory() {
     let (temp, _) = setup();
@@ -84,6 +90,8 @@ fn path_scopes_union_and_cannot_escape_invocation_directory() {
         .stderr(predicate::str::contains("must remain within"));
 }
 
+// Scenario: yes removes only unused references and dry run wins over yes.
+// Requirement: REQ-035
 #[test]
 fn yes_removes_only_unused_references_and_dry_run_wins_over_yes() {
     let (temp, _) = setup();
@@ -106,6 +114,8 @@ fn yes_removes_only_unused_references_and_dry_run_wins_over_yes() {
     assert!(temp.path().join(".ref/refs/RootReference").is_dir());
 }
 
+// Scenario: empty text scope is prominent.
+// Requirement: REQ-036
 #[test]
 fn empty_text_scope_is_prominent() {
     let (temp, _) = setup();
@@ -114,9 +124,12 @@ fn empty_text_scope_is_prominent() {
         .args(["clean", "-n", "only.pdf"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("no eligible text files"));
+        .stdout(predicate::str::contains("no eligible text files").not())
+        .stderr(predicate::str::contains("no eligible text files"));
 }
 
+// Scenario: confirmation can cancel or remove the complete reference directory.
+// Requirement: REQ-035
 #[test]
 fn confirmation_can_cancel_or_remove_the_complete_reference_directory() {
     let temp = tempfile::tempdir().unwrap();

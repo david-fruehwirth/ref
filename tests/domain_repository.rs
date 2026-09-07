@@ -7,6 +7,8 @@ use r#ref::{
 };
 use std::fs;
 
+// Scenario: citation keys accept safe components and reject traversal.
+// Requirement: REQ-005
 #[test]
 fn citation_keys_accept_safe_components_and_reject_traversal() {
     for valid in [
@@ -33,6 +35,8 @@ fn citation_keys_accept_safe_components_and_reject_traversal() {
     }
 }
 
+// Scenario: public formatting covers author shapes.
+// Requirement: REQ-010
 #[test]
 fn public_formatting_covers_author_shapes() {
     let people = [
@@ -55,6 +59,8 @@ fn public_formatting_covers_author_shapes() {
     assert_eq!(display_author(&people), "Vaswani et al.");
 }
 
+// Scenario: generated keys normalize author year and title.
+// Requirement: REQ-012
 #[test]
 fn generated_keys_normalize_author_year_and_title() {
     let cases = [
@@ -104,6 +110,8 @@ fn generated_keys_normalize_author_year_and_title() {
     }
 }
 
+// Scenario: generated keys require author and year but explicit keys remain valid.
+// Requirement: REQ-013
 #[test]
 fn generated_keys_require_author_and_year_but_explicit_keys_remain_valid() {
     let mut reference = support::sample("Example Paper", "Smith", None);
@@ -120,6 +128,8 @@ fn generated_keys_require_author_and_year_but_explicit_keys_remain_valid() {
     assert!(CitationKey::new("custom").is_ok());
 }
 
+// Scenario: metadata round trips unicode optional fields and types.
+// Requirements: REQ-008, REQ-009
 #[test]
 fn metadata_round_trips_unicode_optional_fields_and_types() {
     for entry_type in [
@@ -142,6 +152,8 @@ fn metadata_round_trips_unicode_optional_fields_and_types() {
     assert!(serde_yaml::from_str::<Reference>("type: unknown\ntitle: X\nauthors: []\n").is_err());
 }
 
+// Scenario: initialization discovery and nearest nested repository are filesystem contracts.
+// Requirements: REQ-001, REQ-002, REQ-003
 #[test]
 fn initialization_discovery_and_nearest_nested_repository_are_filesystem_contracts() {
     let temp = tempfile::tempdir().unwrap();
@@ -163,6 +175,8 @@ fn initialization_discovery_and_nearest_nested_repository_are_filesystem_contrac
     assert_eq!(Repository::discover(&nested).unwrap().root(), inner.root());
 }
 
+// Scenario: repository loads manual edits and derives identity from directory.
+// Requirement: REQ-004
 #[test]
 fn repository_loads_manual_edits_and_derives_identity_from_directory() {
     let temp = tempfile::tempdir().unwrap();
@@ -191,6 +205,8 @@ fn repository_loads_manual_edits_and_derives_identity_from_directory() {
     assert!(loaded[1].has_pdf);
 }
 
+// Scenario: doctor structures source proof diagnostics and counts.
+// Requirements: REQ-053, REQ-056
 #[test]
 fn doctor_structures_source_proof_diagnostics_and_counts() {
     let temp = tempfile::tempdir().unwrap();
@@ -232,6 +248,8 @@ fn doctor_structures_source_proof_diagnostics_and_counts() {
     }));
 }
 
+// Scenario: doctor rejects empty and non file source proof.
+// Requirement: REQ-053
 #[test]
 fn doctor_rejects_empty_and_non_file_source_proof() {
     let temp = tempfile::tempdir().unwrap();
@@ -259,6 +277,8 @@ fn doctor_rejects_empty_and_non_file_source_proof() {
     }));
 }
 
+// Scenario: add rename and remove preserve data and reject unsafe mutations.
+// Requirements: REQ-006, REQ-028, REQ-029, REQ-030
 #[test]
 fn add_rename_and_remove_preserve_data_and_reject_unsafe_mutations() {
     let temp = tempfile::tempdir().unwrap();
@@ -286,6 +306,8 @@ fn add_rename_and_remove_preserve_data_and_reject_unsafe_mutations() {
     assert!(repo.remove(&new).is_err());
 }
 
+// Scenario: failed pdf copy leaves no final reference.
+// Requirements: REQ-007, REQ-018
 #[test]
 fn failed_pdf_copy_leaves_no_final_reference() {
     let temp = tempfile::tempdir().unwrap();

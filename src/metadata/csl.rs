@@ -119,6 +119,8 @@ mod tests {
             .into_reference(&"10.1234/example".parse().unwrap())
     }
 
+    // Scenario: converts complete article and dates.
+    // Requirement: REQ-057
     #[test]
     fn converts_complete_article_and_dates() {
         for date in ["[2024]", "[2024,5]", "[2024,5,10]"] {
@@ -142,6 +144,8 @@ mod tests {
         }
     }
 
+    // Scenario: maps supported and unknown types.
+    // Requirement: REQ-058
     #[test]
     fn maps_supported_and_unknown_types() {
         for (csl, expected) in [
@@ -160,6 +164,8 @@ mod tests {
         }
     }
 
+    // Scenario: rejects missing required fields and malformed dates.
+    // Requirement: REQ-059
     #[test]
     fn rejects_missing_required_fields_and_malformed_dates() {
         for json in [

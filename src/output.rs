@@ -189,6 +189,11 @@ pub struct ReferenceOutput {
     pub source_pdf_path: Option<PathBuf>,
 }
 
+#[derive(Clone, Serialize)]
+pub struct RecentReferenceOutput {
+    pub citation_key: String,
+}
+
 impl ReferenceOutput {
     pub fn from_stored(r: &r#ref::repository::StoredReference) -> Self {
         let m = &r.metadata;
@@ -235,6 +240,9 @@ pub enum CommandOutput {
     List {
         reference_count: usize,
         references: Vec<ReferenceOutput>,
+    },
+    Last {
+        references: Vec<RecentReferenceOutput>,
     },
     Search {
         search_query: String,
@@ -325,37 +333,143 @@ pub struct DiagnosticOutput {
 impl HumanRenderable for CommandOutput {
     fn render_human(&self, w: &mut dyn Write) -> Result<()> {
         match self {
-            Self::Init { reference_repository_path, .. } => writeln!(w, "Initialized reference repository at {}", reference_repository_path.display())?,
-            Self::Add { created_reference, .. } => writeln!(w, "Added {}", created_reference.citation_key)?,
-            Self::List { references, .. } | Self::Search { matching_references: references, .. } => table(w, references)?,
+            Self::Init {
+                reference_repository_path,
+                ..
+            } => writeln!(
+                w,
+                "Initialized reference repository at {}",
+                reference_repository_path.display()
+            )?,
+            Self::Add {
+                created_reference, ..
+            } => writeln!(w, "Added {}", created_reference.citation_key)?,
+            Self::List { references, .. }
+            | Self::Search {
+                matching_references: references,
+                ..
+            } => table(w, references)?,
+            Self::Last { references } => {
+                for reference in references {
+                    writeln!(w, "{}", reference.citation_key)?;
+                }
+            }
             Self::Show(r) => show(w, r)?,
             Self::Open { .. } => (),
-            Self::Attach { citation_key, .. } => writeln!(w, "Attached source PDF to {citation_key}")?,
-            Self::Edit { citation_key, .. } => writeln!(w, "Updated {citation_key}")?,
-            Self::Rename { previous_citation_key, new_citation_key, .. } => writeln!(w, "Renamed {previous_citation_key} → {new_citation_key}\n\nNote: existing \\cite{{{previous_citation_key}}} references are not updated automatically.")?,
-            Self::Remove { removed_citation_key, reference_removed, .. } if *reference_removed => writeln!(w, "Removed {removed_citation_key}")?,
+            Self::Attach { citation_key, .. } => {
+                writeln!(w, "Attached source PDF to {citation_key}")?
+            }
+            Self::Edit { .. } => (),
+            Self::Rename {
+                previous_citation_key,
+                new_citation_key,
+                ..
+            } => writeln!(w, "Renamed {previous_citation_key} → {new_citation_key}")?,
+            Self::Remove {
+                removed_citation_key,
+                reference_removed,
+                ..
+            } if *reference_removed => writeln!(w, "Removed {removed_citation_key}")?,
             Self::Remove { .. } => (),
-            Self::Export { bibliography_content: Some(content), .. } => write!(w, "{content}")?,
+            Self::Export {
+                bibliography_content: Some(content),
+                ..
+            } => write!(w, "{content}")?,
             Self::Export { .. } => (),
-            Self::Import { input_bibliography_path, entries_found, references_imported, references_skipped, references_failed, .. } => {
-                if *references_skipped == 0 && *references_failed == 0 { writeln!(w, "Imported {references_imported} references from {}", input_bibliography_path.display())?; }
-                else { writeln!(w, "Import complete with errors.\n\nEntries:  {entries_found}\nImported: {references_imported}\nSkipped:  {references_skipped}\nFailed:   {references_failed}")?; }
+            Self::Import {
+                input_bibliography_path,
+                entries_found,
+                references_imported,
+                references_skipped,
+                references_failed,
+                ..
+            } => {
+                if *references_skipped == 0 && *references_failed == 0 {
+                    writeln!(
+                        w,
+                        "Imported {references_imported} references from {}",
+                        input_bibliography_path.display()
+                    )?;
+                } else {
+                    writeln!(w, "Import complete with errors.\n\nEntries:  {entries_found}\nImported: {references_imported}\nSkipped:  {references_skipped}\nFailed:   {references_failed}")?;
+                }
             }
-            Self::Clean { dry_run, repository_root_path, scan_root_path, eligible_files_scanned, reference_count, used_reference_count, unused_reference_count, unused_references, references_removed, .. } => {
+            Self::Clean {
+                dry_run,
+                repository_root_path,
+                scan_root_path,
+                eligible_files_scanned,
+                reference_count,
+                used_reference_count,
+                unused_reference_count,
+                unused_references,
+                references_removed,
+                ..
+            } => {
                 writeln!(w, "Repository:\n  {}\n\nScan root:\n  {}\n\nFiles scanned: {eligible_files_scanned}\nReferences:    {reference_count}\nUsed:          {used_reference_count}\nUnused:        {unused_reference_count}", repository_root_path.display(), scan_root_path.display())?;
-                let project_root = repository_root_path.parent().unwrap_or(repository_root_path);
+                let project_root = repository_root_path
+                    .parent()
+                    .unwrap_or(repository_root_path);
                 if scan_root_path != project_root {
-                    writeln!(w, "\nNote: files outside this directory were not considered.")?;
+                    writeln!(
+                        w,
+                        "\nNote: files outside this directory were not considered."
+                    )?;
                 }
-                if *eligible_files_scanned == 0 {
-                    writeln!(w, "\nwarning: no eligible text files were found in the clean scope\nAll references would appear unused.")?;
+                if !unused_references.is_empty() {
+                    writeln!(
+                        w,
+                        "\n{}:",
+                        if *dry_run {
+                            "Would remove"
+                        } else {
+                            "Unused references"
+                        }
+                    )?;
+                    for r in unused_references {
+                        writeln!(w, "\n  {}\n    {}", r.citation_key, r.title)?;
+                    }
                 }
-                if !unused_references.is_empty() { writeln!(w, "\n{}:", if *dry_run { "Would remove" } else { "Unused references" })?; for r in unused_references { writeln!(w, "\n  {}\n    {}", r.citation_key, r.title)?; } }
-                if *dry_run { writeln!(w, "\nDry run: no references were removed.")?; } else if !references_removed.is_empty() { writeln!(w, "Removed {} unused references.", references_removed.len())?; } else if *unused_reference_count > 0 { writeln!(w, "Cleanup cancelled. No references were removed.")?; } else { writeln!(w, "\nNothing to clean.")?; }
+                if *dry_run {
+                    writeln!(w, "\nDry run: no references were removed.")?;
+                } else if !references_removed.is_empty() {
+                    writeln!(w, "Removed {} unused references.", references_removed.len())?;
+                } else if *unused_reference_count > 0 {
+                    writeln!(w, "Cleanup cancelled. No references were removed.")?;
+                } else {
+                    writeln!(w, "\nNothing to clean.")?;
+                }
             }
-            Self::Doctor { repository_root_path, reference_count, references_with_source_pdf, warning_count, error_count, diagnostics, .. } => {
+            Self::Doctor {
+                repository_root_path,
+                reference_count,
+                references_with_source_pdf,
+                warning_count,
+                error_count,
+                diagnostics,
+                ..
+            } => {
                 writeln!(w, "Repository: {}\n\n✓ configuration valid\n✓ {reference_count} references discovered\n{} {references_with_source_pdf} / {reference_count} references have source PDFs", repository_root_path.display(), if *error_count == 0 && *warning_count == 0 { "✓" } else { "!" })?;
-                for heading in ["warning", "error"] { let ds: Vec<_> = diagnostics.iter().filter(|d| d.severity == heading).collect(); if !ds.is_empty() { writeln!(w, "\n{}s:", if heading == "warning" { "Warning" } else { "Error" })?; for d in ds { writeln!(w, "  {}", d.message)?; } } }
+                for heading in ["warning", "error"] {
+                    let ds: Vec<_> = diagnostics
+                        .iter()
+                        .filter(|d| d.severity == heading)
+                        .collect();
+                    if !ds.is_empty() {
+                        writeln!(
+                            w,
+                            "\n{}s:",
+                            if heading == "warning" {
+                                "Warning"
+                            } else {
+                                "Error"
+                            }
+                        )?;
+                        for d in ds {
+                            writeln!(w, "  {}", d.message)?;
+                        }
+                    }
+                }
                 writeln!(w, "\n{reference_count} references, {warning_count} warnings, {error_count} errors")?;
             }
         }

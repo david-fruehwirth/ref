@@ -17,6 +17,8 @@ pub struct StoredReference {
     pub metadata: Reference,
     pub path: PathBuf,
     pub has_pdf: bool,
+    /// Operational creation metadata; absent for repositories created by older versions.
+    pub added_at: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -145,11 +147,10 @@ impl Repository {
             bail!("reference `{key}` does not exist");
         }
         let yaml = path.join("ref.yaml");
-        let metadata: Reference = serde_yaml::from_str(
-            &fs::read_to_string(&yaml)
-                .with_context(|| format!("failed to read {}", yaml.display()))?,
-        )
-        .with_context(|| format!("failed to parse {}", yaml.display()))?;
+        let contents = fs::read_to_string(&yaml)
+            .with_context(|| format!("failed to read {}", yaml.display()))?;
+        let (metadata, added_at) = parse_reference_yaml(&contents)
+            .with_context(|| format!("failed to parse {}", yaml.display()))?;
         metadata
             .validate()
             .with_context(|| format!("invalid metadata in {}", yaml.display()))?;
@@ -158,7 +159,20 @@ impl Repository {
             metadata,
             has_pdf: path.join("paper.pdf").is_file(),
             path,
+            added_at,
         })
+    }
+
+    /// Return references with reliable persisted creation metadata, newest first.
+    pub fn recent_references(&self, limit: usize) -> Result<Vec<StoredReference>> {
+        let mut references: Vec<_> = self
+            .load_all()?
+            .into_iter()
+            .filter(|reference| reference.added_at.is_some())
+            .collect();
+        references.sort_by(|a, b| b.added_at.cmp(&a.added_at).then_with(|| a.key.cmp(&b.key)));
+        references.truncate(limit);
+        Ok(references)
     }
 
     pub fn load_all(&self) -> Result<Vec<StoredReference>> {
@@ -188,10 +202,15 @@ impl Repository {
         let tmp = tempfile::Builder::new()
             .prefix(".ref-add-")
             .tempdir_in(self.references_dir())?;
-        fs::write(
-            tmp.path().join("ref.yaml"),
-            serde_yaml::to_string(metadata)?,
-        )?;
+        let mut value = serde_yaml::to_value(metadata)?;
+        value
+            .as_mapping_mut()
+            .context("reference metadata did not serialize as a mapping")?
+            .insert(
+                serde_yaml::Value::String("added_at".into()),
+                serde_yaml::Value::String(utc_now()?),
+            );
+        fs::write(tmp.path().join("ref.yaml"), serde_yaml::to_string(&value)?)?;
         if let Some(pdf) = pdf {
             fs::copy(pdf, tmp.path().join("paper.pdf"))?;
         }
@@ -225,9 +244,93 @@ impl Repository {
     }
 }
 
+pub(crate) fn parse_reference_yaml(contents: &str) -> Result<(Reference, Option<String>)> {
+    let mut value: serde_yaml::Value = serde_yaml::from_str(contents)?;
+    let added_at = value
+        .as_mapping_mut()
+        .and_then(|mapping| mapping.remove(serde_yaml::Value::String("added_at".into())))
+        .map(serde_yaml::from_value::<String>)
+        .transpose()?;
+    if let Some(timestamp) = &added_at {
+        validate_utc_timestamp(timestamp)?;
+    }
+    Ok((serde_yaml::from_value(value)?, added_at))
+}
+
+fn validate_utc_timestamp(value: &str) -> Result<()> {
+    let bytes = value.as_bytes();
+    let shape = bytes.len() == 30
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[13] == b':'
+        && bytes[16] == b':'
+        && bytes[19] == b'.'
+        && bytes[29] == b'Z'
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            matches!(index, 4 | 7 | 10 | 13 | 16 | 19 | 29) || byte.is_ascii_digit()
+        });
+    if !shape {
+        bail!("expected a UTC timestamp in YYYY-MM-DDTHH:MM:SS.nnnnnnnnnZ form");
+    }
+    let component = |range: std::ops::Range<usize>| -> Result<u32> {
+        value[range]
+            .parse()
+            .context("timestamp contains an invalid numeric component")
+    };
+    let year = component(0..4)?;
+    let month = component(5..7)?;
+    let day = component(8..10)?;
+    let hour = component(11..13)?;
+    let minute = component(14..16)?;
+    let second = component(17..19)?;
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => 0,
+    };
+    if day == 0 || day > max_day || hour > 23 || minute > 59 || second > 59 {
+        bail!("timestamp contains an out-of-range UTC date or time");
+    }
+    Ok(())
+}
+
+/// Format `SystemTime` without relying on platform-specific time APIs.
+fn utc_now() -> Result<String> {
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock is before the Unix epoch")?;
+    let seconds = elapsed.as_secs();
+    let days = (seconds / 86_400) as i64;
+    let day_seconds = seconds % 86_400;
+    // Howard Hinnant's civil-from-days conversion (days since 1970-01-01).
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    Ok(format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:09}Z",
+        day_seconds / 3_600,
+        day_seconds / 60 % 60,
+        day_seconds % 60,
+        elapsed.subsec_nanos()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Scenario: init and discover.
+    // Requirements: REQ-001, REQ-002
     #[test]
     fn init_and_discover() {
         let t = tempfile::tempdir().unwrap();
@@ -237,12 +340,16 @@ mod tests {
         assert_eq!(Repository::discover(&nested).unwrap().root(), r.root());
         assert!(Repository::init(t.path()).is_err());
     }
+    // Scenario: discovery fails.
+    // Requirement: REQ-003
     #[test]
     fn discovery_fails() {
         let t = tempfile::tempdir().unwrap();
         assert!(Repository::discover(t.path()).is_err());
     }
 
+    // Scenario: failed commit removes staging directory.
+    // Requirement: REQ-007
     #[test]
     fn failed_commit_removes_staging_directory() {
         let t = tempfile::tempdir().unwrap();

@@ -269,6 +269,8 @@ fn contains_key(text: &[u8], key: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::contains_key;
+    // Scenario: key matches only at identity boundaries.
+    // Requirement: REQ-031
     #[test]
     fn key_matches_only_at_identity_boundaries() {
         assert!(contains_key(

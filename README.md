@@ -2,6 +2,10 @@
 
 `ref` is a Git-like, CLI-native reference manager for scientific writing. References live inside a project-local `.ref` directory as human-readable YAML metadata with optional PDFs. The filesystem is the database, so a library remains easy to inspect, edit, diff, and version beside a LaTeX thesis or paper.
 
+The numbered application behavior specification is maintained in
+[`docs/requirements.md`](docs/requirements.md); test annotations link existing
+tests to the requirements they validate.
+
 ## Why `ref`?
 
 `ref` is designed for terminal-centric, project-local writing workflows. It favors readable files and explicit commands over an opaque global database: metadata can be reviewed in Git, source PDFs can live beside it, and BibLaTeX can be generated whenever the document is built. Normal use requires no GUI, account, background service, or network connection; only optional DOI metadata lookup uses the network.
@@ -30,6 +34,7 @@ ref add ~/Downloads/rocchio.pdf \
 
 ref list
 ref search rocchio
+ref last
 ref open Rocchio1971RelevanceFeedback
 ref export > references.bib
 ref doctor
@@ -170,6 +175,7 @@ ref search attention --json |
 | `ref add` | Add a reference with a PDF, without one, or from a DOI |
 | `ref list` | List stored references |
 | `ref search` | Search bibliographic metadata |
+| `ref last` | Print recently added citation keys |
 | `ref show` | Show one exact citation key |
 | `ref open` | Open a reference's source PDF |
 | `ref attach` | Attach a PDF to an existing reference |
@@ -257,6 +263,18 @@ ref search Rocchio --key
 ```
 
 Use at most one of `--key`, `--author`, `--title`, `--year`, or `--tag` per search.
+
+### `ref last`
+
+Print the citation key most recently added to the repository, or request more
+keys in newest-first order. Output is one key per line for direct use in shell
+pipelines. Legacy references without persisted creation metadata are omitted.
+
+```bash
+ref last
+ref last -n 5
+key=$(ref last)
+```
 
 ### `ref show`
 

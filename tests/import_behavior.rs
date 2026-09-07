@@ -14,6 +14,8 @@ fn initialized() -> (tempfile::TempDir, Repository) {
     (temp, repo)
 }
 
+// Scenario: imports common fields authors macros unicode and no pdf.
+// Requirements: REQ-037, REQ-038, REQ-049
 #[test]
 fn imports_common_fields_authors_macros_unicode_and_no_pdf() {
     let (temp, repo) = initialized();
@@ -54,6 +56,8 @@ fn imports_common_fields_authors_macros_unicode_and_no_pdf() {
     assert!(!temp.path().join(".ref/refs/smith2024/paper.pdf").exists());
 }
 
+// Scenario: maps entry types and date.
+// Requirements: REQ-039, REQ-044, REQ-045
 #[test]
 fn maps_entry_types_and_date() {
     let (_temp, repo) = initialized();
@@ -88,6 +92,8 @@ fn maps_entry_types_and_date() {
     }
 }
 
+// Scenario: imports all canonical types aliases and mixed case types.
+// Requirements: REQ-044, REQ-045, REQ-046, REQ-048
 #[test]
 fn imports_all_canonical_types_aliases_and_mixed_case_types() {
     let (_temp, repo) = initialized();
@@ -150,6 +156,8 @@ fn imports_all_canonical_types_aliases_and_mixed_case_types() {
     }
 }
 
+// Scenario: partial failures conflicts and unknown types are structured.
+// Requirements: REQ-041, REQ-042, REQ-047
 #[test]
 fn partial_failures_conflicts_and_unknown_types_are_structured() {
     let (_temp, repo) = initialized();
@@ -189,6 +197,8 @@ fn partial_failures_conflicts_and_unknown_types_are_structured() {
     assert!(repo.contains(&CitationKey::new("good-c").unwrap()));
 }
 
+// Scenario: malformed file is rejected before mutation.
+// Requirement: REQ-040
 #[test]
 fn malformed_file_is_rejected_before_mutation() {
     let (_temp, repo) = initialized();
@@ -198,6 +208,8 @@ fn malformed_file_is_rejected_before_mutation() {
     assert!(repo.load_all().unwrap().is_empty());
 }
 
+// Scenario: cli imports exports and reports partial status.
+// Requirements: REQ-041, REQ-043
 #[test]
 fn cli_imports_exports_and_reports_partial_status() {
     let temp = tempfile::tempdir().unwrap();

@@ -257,6 +257,8 @@ mod tests {
         });
         (format!("http://{address}/"), handle)
     }
+    // Scenario: normalizes common doi forms.
+    // Requirement: REQ-011
     #[test]
     fn normalizes_common_doi_forms() {
         for v in [
@@ -271,12 +273,16 @@ mod tests {
             assert_eq!(v.parse::<Doi>().unwrap().as_str(), "10.1234/example");
         }
     }
+    // Scenario: rejects invalid dois.
+    // Requirement: REQ-011
     #[test]
     fn rejects_invalid_dois() {
         for v in ["foo", "10", "10.", "10.1234", "https://example.com/foo"] {
             assert!(v.parse::<Doi>().is_err());
         }
     }
+    // Scenario: sends header and parses success.
+    // Requirement: REQ-060
     #[test]
     fn sends_header_and_parses_success() {
         let (url, h) = server("200 OK", CSL_JSON, COMPLETE, Duration::ZERO);
@@ -291,6 +297,8 @@ mod tests {
             .to_ascii_lowercase()
             .contains(&format!("accept: {CSL_JSON}").to_ascii_lowercase()));
     }
+    // Scenario: categorizes failures.
+    // Requirement: REQ-061
     #[test]
     fn categorizes_failures() {
         for (s, c, b, e) in [
@@ -320,6 +328,8 @@ mod tests {
             h.join().unwrap();
         }
     }
+    // Scenario: times out.
+    // Requirement: REQ-062
     #[test]
     fn times_out() {
         let (url, h) = server("200 OK", CSL_JSON, COMPLETE, Duration::from_millis(100));
@@ -330,6 +340,8 @@ mod tests {
         assert!(matches!(e, LookupError::Retrieval { .. }));
         h.join().unwrap();
     }
+    // Scenario: follows redirects.
+    // Requirement: REQ-063
     #[test]
     fn follows_redirects() {
         let (dest, dh) = server("200 OK", CSL_JSON, COMPLETE, Duration::ZERO);

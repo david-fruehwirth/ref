@@ -96,6 +96,7 @@ mod tests {
             key: CitationKey::new(key).unwrap(),
             path: PathBuf::new(),
             has_pdf: false,
+            added_at: None,
             metadata: Reference {
                 entry_type: ReferenceType::Article,
                 title: "A & B".into(),
@@ -116,6 +117,8 @@ mod tests {
             },
         }
     }
+    // Scenario: export is escaped and sorted.
+    // Requirements: REQ-050, REQ-051
     #[test]
     fn export_is_escaped_and_sorted() {
         let out = biblatex(&[item("z"), item("a")]);
