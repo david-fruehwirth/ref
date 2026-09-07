@@ -2,6 +2,10 @@
 
 `ref` is a Git-like, CLI-native reference manager for scientific writing. References live inside a project-local `.ref` directory as human-readable YAML metadata with optional PDFs. The filesystem is the database, so a library remains easy to inspect, edit, diff, and version beside a LaTeX thesis or paper.
 
+The numbered application behavior specification is maintained in
+[`docs/requirements.md`](docs/requirements.md); test annotations link existing
+tests to the requirements they validate.
+
 ## Why `ref`?
 
 `ref` is designed for terminal-centric, project-local writing workflows. It favors readable files and explicit commands over an opaque global database: metadata can be reviewed in Git, source PDFs can live beside it, and BibLaTeX can be generated whenever the document is built. Normal use requires no GUI, account, background service, or network connection; only optional DOI metadata lookup uses the network.

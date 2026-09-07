@@ -32,6 +32,8 @@ fn stored(key: &str) -> StoredReference {
     }
 }
 
+// Scenario: biblatex is deterministic sorted and escapes public output.
+// Requirements: REQ-050, REQ-051
 #[test]
 fn biblatex_is_deterministic_sorted_and_escapes_public_output() {
     let mut z = stored("zeta2024");
@@ -58,6 +60,8 @@ fn biblatex_is_deterministic_sorted_and_escapes_public_output() {
     assert!(first.contains("journaltitle"));
 }
 
+// Scenario: non numeric page text is preserved instead of blindly normalized.
+// Requirement: REQ-052
 #[test]
 fn non_numeric_page_text_is_preserved_instead_of_blindly_normalized() {
     let mut item = stored("pages");

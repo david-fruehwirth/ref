@@ -228,6 +228,8 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Scenario: init and discover.
+    // Requirements: REQ-001, REQ-002
     #[test]
     fn init_and_discover() {
         let t = tempfile::tempdir().unwrap();
@@ -237,12 +239,16 @@ mod tests {
         assert_eq!(Repository::discover(&nested).unwrap().root(), r.root());
         assert!(Repository::init(t.path()).is_err());
     }
+    // Scenario: discovery fails.
+    // Requirement: REQ-003
     #[test]
     fn discovery_fails() {
         let t = tempfile::tempdir().unwrap();
         assert!(Repository::discover(t.path()).is_err());
     }
 
+    // Scenario: failed commit removes staging directory.
+    // Requirement: REQ-007
     #[test]
     fn failed_commit_removes_staging_directory() {
         let t = tempfile::tempdir().unwrap();

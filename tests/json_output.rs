@@ -13,6 +13,8 @@ fn json(bytes: &[u8]) -> Value {
     serde_json::from_slice(bytes).expect("output is one JSON document")
 }
 
+// Scenario: list and search use common envelope.
+// Requirements: REQ-021, REQ-022, REQ-067
 #[test]
 fn list_and_search_use_common_envelope() {
     let (temp, repo) = repository();
@@ -34,6 +36,8 @@ fn list_and_search_use_common_envelope() {
         assert!(value["result"].is_object());
     }
 }
+// Scenario: missing reference is structured stderr only.
+// Requirements: REQ-023, REQ-066, REQ-067
 #[test]
 fn missing_reference_is_structured_stderr_only() {
     let (temp, _) = repository();
@@ -48,6 +52,8 @@ fn missing_reference_is_structured_stderr_only() {
     assert_eq!(value["error"]["error_code"], "reference_not_found");
     assert_eq!(value["error"]["citation_key"], "MissingKey");
 }
+// Scenario: json remove requires explicit confirmation.
+// Requirement: REQ-068
 #[test]
 fn json_remove_requires_explicit_confirmation() {
     let (temp, repo) = repository();

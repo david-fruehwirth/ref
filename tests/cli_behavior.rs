@@ -25,6 +25,8 @@ fn doi_server(status: &str, body: &str) -> (String, thread::JoinHandle<()>) {
     (url, handle)
 }
 
+// Scenario: add from doi uses normal no pdf persistence and detects duplicates.
+// Requirements: REQ-006, REQ-017
 #[test]
 fn add_from_doi_uses_normal_no_pdf_persistence_and_detects_duplicates() {
     let temp = tempfile::tempdir().unwrap();
@@ -66,6 +68,8 @@ fn add_from_doi_uses_normal_no_pdf_persistence_and_detects_duplicates() {
         ));
 }
 
+// Scenario: failed doi adds do not mutate the repository.
+// Requirements: REQ-018, REQ-061
 #[test]
 fn failed_doi_adds_do_not_mutate_the_repository() {
     let temp = tempfile::tempdir().unwrap();
@@ -89,6 +93,8 @@ fn failed_doi_adds_do_not_mutate_the_repository() {
     );
 }
 
+// Scenario: add rejects a pdf and doi as competing sources.
+// Requirement: REQ-014
 #[test]
 fn add_rejects_a_pdf_and_doi_as_competing_sources() {
     let temp = tempfile::tempdir().unwrap();
@@ -101,6 +107,8 @@ fn add_rejects_a_pdf_and_doi_as_competing_sources() {
         .stderr(predicate::str::contains("cannot be used with"));
 }
 
+// Scenario: help and version expose stable command surface.
+// Requirement: REQ-064
 #[test]
 fn help_and_version_expose_stable_command_surface() {
     let temp = tempfile::tempdir().unwrap();
@@ -124,6 +132,8 @@ fn help_and_version_expose_stable_command_surface() {
         .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
 }
 
+// Scenario: core subcommand help explains options and safety semantics.
+// Requirement: REQ-064
 #[test]
 fn core_subcommand_help_explains_options_and_safety_semantics() {
     let temp = tempfile::tempdir().unwrap();
@@ -163,6 +173,8 @@ fn core_subcommand_help_explains_options_and_safety_semantics() {
         .stdout(predicate::str::contains("never overwritten"));
 }
 
+// Scenario: cli wires init add list search show rename remove and export.
+// Requirement: REQ-065
 #[test]
 fn cli_wires_init_add_list_search_show_rename_remove_and_export() {
     let temp = tempfile::tempdir().unwrap();
@@ -236,6 +248,8 @@ fn cli_wires_init_add_list_search_show_rename_remove_and_export() {
     assert!(!temp.path().join(".ref/refs/smith2025").exists());
 }
 
+// Scenario: cli rejects missing pdf duplicate key and unknown reference without partial state.
+// Requirements: REQ-006, REQ-018, REQ-023
 #[test]
 fn cli_rejects_missing_pdf_duplicate_key_and_unknown_reference_without_partial_state() {
     let temp = tempfile::tempdir().unwrap();
@@ -263,6 +277,8 @@ fn cli_rejects_missing_pdf_duplicate_key_and_unknown_reference_without_partial_s
         .stderr(predicate::str::contains("does not exist"));
 }
 
+// Scenario: doctor maps healthy warnings and errors to exit codes.
+// Requirements: REQ-053, REQ-056
 #[test]
 fn doctor_maps_healthy_warnings_and_errors_to_exit_codes() {
     let healthy = tempfile::tempdir().unwrap();
@@ -323,6 +339,8 @@ fn doctor_maps_healthy_warnings_and_errors_to_exit_codes() {
         .stdout(predicate::str::contains("invalid citation key"));
 }
 
+// Scenario: doctor reports structural and metadata failures.
+// Requirements: REQ-054, REQ-056
 #[test]
 fn doctor_reports_structural_and_metadata_failures() {
     for mutation in ["config", "refs"] {
@@ -352,6 +370,8 @@ fn doctor_reports_structural_and_metadata_failures() {
         .stdout(predicate::str::contains("invalid metadata"));
 }
 
+// Scenario: doctor distinguishes duplicate and malformed dois.
+// Requirement: REQ-055
 #[test]
 fn doctor_distinguishes_duplicate_and_malformed_dois() {
     let warning = tempfile::tempdir().unwrap();
@@ -417,6 +437,8 @@ fn doctor_distinguishes_duplicate_and_malformed_dois() {
         .stdout(predicate::str::contains("malformed DOI"));
 }
 
+// Scenario: add accepts cli metadata attaches pdf and generates key.
+// Requirements: REQ-012, REQ-015
 #[test]
 fn add_accepts_cli_metadata_attaches_pdf_and_generates_key() {
     let temp = tempfile::tempdir().unwrap();
@@ -465,6 +487,8 @@ fn add_accepts_cli_metadata_attaches_pdf_and_generates_key() {
         .stdout(predicate::str::contains("0 warnings, 0 errors"));
 }
 
+// Scenario: add without pdf uses metadata and rejects bad inputs and conflicts.
+// Requirements: REQ-006, REQ-014, REQ-016, REQ-018
 #[test]
 fn add_without_pdf_uses_metadata_and_rejects_bad_inputs_and_conflicts() {
     let temp = tempfile::tempdir().unwrap();
@@ -511,6 +535,8 @@ fn add_without_pdf_uses_metadata_and_rejects_bad_inputs_and_conflicts() {
     assert!(!temp.path().join(".ref/refs/bad").exists());
 }
 
+// Scenario: generated add keys handle normalization collisions and explicit override.
+// Requirements: REQ-012, REQ-013
 #[test]
 fn generated_add_keys_handle_normalization_collisions_and_explicit_override() {
     let temp = tempfile::tempdir().unwrap();

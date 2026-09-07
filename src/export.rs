@@ -116,6 +116,8 @@ mod tests {
             },
         }
     }
+    // Scenario: export is escaped and sorted.
+    // Requirements: REQ-050, REQ-051
     #[test]
     fn export_is_escaped_and_sorted() {
         let out = biblatex(&[item("z"), item("a")]);

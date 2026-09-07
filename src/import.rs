@@ -552,6 +552,8 @@ impl<'a> Parser<'a> {
 mod tests {
     use super::*;
 
+    // Scenario: parser expands macros and balances title braces.
+    // Requirements: REQ-048, REQ-049
     #[test]
     fn parser_expands_macros_and_balances_title_braces() {
         let entries = parse_bibliography(
@@ -565,6 +567,8 @@ mod tests {
         assert_eq!(entries[0].fields["journal"], "Journal");
     }
 
+    // Scenario: malformed input has location.
+    // Requirement: REQ-040
     #[test]
     fn malformed_input_has_location() {
         let error = parse_bibliography("@article{x, title={oops}").unwrap_err();
