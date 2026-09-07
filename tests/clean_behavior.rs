@@ -124,7 +124,8 @@ fn empty_text_scope_is_prominent() {
         .args(["clean", "-n", "only.pdf"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("no eligible text files"));
+        .stdout(predicate::str::contains("no eligible text files").not())
+        .stderr(predicate::str::contains("no eligible text files"));
 }
 
 // Scenario: confirmation can cancel or remove the complete reference directory.

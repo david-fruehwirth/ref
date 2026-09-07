@@ -155,7 +155,7 @@ enum Commands {
     },
     /// Find and remove references unused in the current source scope
     #[command(
-        long_about = "Find and remove references unused in the current source scope.\n\nThe repository is discovered by searching parent directories, but citation usage is searched only from the current directory downward. Optional paths can narrow, but never expand, that scope. .ref, .git, PDFs, and .bib/.bibtex files are excluded. An incomplete scan prevents deletion. Preview with --dry-run before destructive use.",
+        long_about = "Find and remove references unused in the current source scope.\n\nThe repository is discovered by searching parent directories, but citation usage is searched only from the current directory downward. Optional paths can narrow, but never expand, that scope. .ref, .git, PDFs, and .bib/.bibtex files are excluded. An incomplete scan prevents deletion. Preview with --dry-run; destructive use requires confirmation or --yes.",
         after_help = "Examples:\n  ref clean --dry-run\n  ref clean\n  ref clean --yes\n  ref clean chapters/\n  ref clean introduction.tex chapters/methods/"
     )]
     Clean(CleanArgs),
@@ -807,7 +807,7 @@ fn remove(repo: &Repository, key: String, yes: bool, format: OutputFormat) -> Re
         if format == OutputFormat::Json || !io::stdin().is_terminal() {
             bail!("confirmation required; use --yes in non-interactive mode")
         }
-        println!(
+        eprintln!(
             "{}\n{}\n{}\n{}\n",
             r.key,
             r.metadata
@@ -869,8 +869,8 @@ fn clean_cmd(repo: &Repository, args: CleanArgs, format: OutputFormat) -> Result
         if format == OutputFormat::Json {
             bail!("confirmation required; use --yes in non-interactive mode")
         }
-        print!("\nRemove these references? [y/N] ");
-        io::stdout().flush()?;
+        eprint!("\nRemove these references? [y/N] ");
+        io::stderr().flush()?;
         let mut response = String::new();
         io::stdin().read_line(&mut response)?;
         if !matches!(response.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
@@ -906,6 +906,15 @@ fn clean_cmd(repo: &Repository, args: CleanArgs, format: OutputFormat) -> Result
         }
     }
     let partial = !failed.is_empty();
+    let warnings = if analysis.files_scanned == 0 {
+        vec![WarningOutput {
+            warning_code: "empty_clean_scope".into(),
+            message: "no eligible text files were found in the clean scope; all references would appear unused".into(),
+            citation_key: None,
+        }]
+    } else {
+        vec![]
+    };
     Ok(Execution {
         command: "clean",
         output: CommandOutput::Clean {
@@ -925,7 +934,7 @@ fn clean_cmd(repo: &Repository, args: CleanArgs, format: OutputFormat) -> Result
         } else {
             OperationStatus::Success
         },
-        warnings: vec![],
+        warnings,
         exit_code: u8::from(partial),
     })
 }

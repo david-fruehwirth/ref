@@ -72,3 +72,25 @@ fn json_remove_requires_explicit_confirmation() {
         "confirmation_required"
     );
 }
+
+// Scenario: clean warnings stay structured and do not contaminate its JSON document.
+// Requirements: REQ-036, REQ-066, REQ-067
+#[test]
+fn json_clean_reports_empty_scope_in_the_common_envelope() {
+    let (temp, repo) = repository();
+    add(
+        &repo,
+        "Smith2024Attention",
+        &sample("Attention Models", "Smith", Some(2024)),
+    );
+    std::fs::write(temp.path().join("only.pdf"), b"%PDF").unwrap();
+    let output = command(temp.path())
+        .args(["clean", "--dry-run", "only.pdf", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value = json(&output.stdout);
+    assert_eq!(value["command"], "clean");
+    assert_eq!(value["warnings"][0]["warning_code"], "empty_clean_scope");
+}
