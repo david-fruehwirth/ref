@@ -239,12 +239,21 @@ ref add paper.pdf \
 
 ### `ref list`
 
-List citation key, year, author, and title. Sort by `key` (the default), `year`, `author`, or `title`:
+List references as readable blocks headed by their citation keys. Sort by `key`
+(the default), `year`, `author`, or `title`:
 
 ```bash
 ref list
 ref list --sort year
 ref list --sort author
+```
+
+```text
+Smith2024Attention
+    Title:   Attention and Social Media
+    Authors: John Smith, Jane Doe
+    Year:    2024
+    Type:    article
 ```
 
 ### `ref search`

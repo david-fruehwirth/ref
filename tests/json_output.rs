@@ -14,7 +14,7 @@ fn json(bytes: &[u8]) -> Value {
 }
 
 // Scenario: list and search use common envelope.
-// Requirements: REQ-021, REQ-022, REQ-067
+// Requirements: REQ-021, REQ-022, REQ-067, REQ-075
 #[test]
 fn list_and_search_use_common_envelope() {
     let (temp, repo) = repository();
@@ -23,17 +23,28 @@ fn list_and_search_use_common_envelope() {
         "Smith2024Attention",
         &sample("Attention Models", "Smith", Some(2024)),
     );
-    for args in [
-        vec!["list", "--json"],
-        vec!["--json", "search", "attention"],
+    for (args, command_name, collection) in [
+        (vec!["list", "--json"], "list", "references"),
+        (
+            vec!["--json", "search", "attention"],
+            "search",
+            "matching_references",
+        ),
     ] {
         let output = command(temp.path()).args(args).output().unwrap();
         assert!(output.status.success());
         assert!(output.stderr.is_empty());
         let value = json(&output.stdout);
         assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["command"], command_name);
         assert_eq!(value["operation_status"], "success");
-        assert!(value["result"].is_object());
+        assert_eq!(
+            value["result"][collection][0]["citation_key"],
+            "Smith2024Attention"
+        );
+        assert_eq!(value["result"][collection][0]["title"], "Attention Models");
+        assert_eq!(value["result"][collection][0]["publication_year"], 2024);
+        assert!(!String::from_utf8(output.stdout).unwrap().contains("\x1b["));
     }
 }
 // Scenario: missing reference is structured stderr only.

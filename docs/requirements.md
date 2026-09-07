@@ -400,3 +400,25 @@ without headers, labels, timestamps, or explanatory text.
 JSON `ref last` output shall use the common versioned success envelope and expose
 the selected references as objects containing `citation_key`, without exposing
 their creation timestamps.
+
+### REQ-073: Human reference summaries
+
+Human-readable `ref list` and `ref search` results shall use one shared reference
+summary representation. Each reference shall be a separate block headed by its
+citation key, followed by indented, consistently aligned labels for its title,
+authors when present, publication year when present, and reference type. Blocks
+shall be separated by one blank line and shall not use a column-oriented table or
+depend on terminal-width calculations. Unicode values shall be preserved.
+
+### REQ-074: Summary color and redirection
+
+The shared human reference summary may style citation keys and labels when stdout
+is an interactive terminal and color is enabled. It shall emit no terminal control
+sequences when stdout is redirected or piped, or when `NO_COLOR` is present, so
+plain results remain suitable for stdout redirection.
+
+### REQ-075: Human and JSON presentation separation
+
+Human reference-summary formatting and color shall not alter list or search JSON
+output, which shall continue to use the existing schema, fields, values, and
+versioned envelope without terminal control sequences.
