@@ -12,13 +12,17 @@ tests to the requirements they validate.
 
 ## Installation
 
-Install stable Rust, clone this repository, and install the binary from the checkout:
+Install with Homebrew:
+
+```bash
+brew install david-fruehwirth/ref/ref
+```
+
+As a fallback, install stable Rust, clone this repository, and install the binary from the checkout:
 
 ```bash
 cargo install --path .
 ```
-
-The package is not documented here as a crates.io, Homebrew, or release-binary distribution because this repository does not currently provide those installation paths.
 
 ## Quick start
 
@@ -169,24 +173,24 @@ ref search attention --json |
   jq -r '.result.matching_references[].citation_key'
 ```
 
-| Command | Purpose |
-| --- | --- |
-| `ref init` | Initialize a `.ref` repository |
-| `ref add` | Add a reference with a PDF, without one, or from a DOI |
-| `ref list` | List stored references |
-| `ref search` | Search bibliographic metadata |
-| `ref last` | Print recently added citation keys |
-| `ref show` | Show one exact citation key |
-| `ref open` | Open a reference's source PDF |
-| `ref attach` | Attach a PDF to an existing reference |
-| `ref edit` | Edit YAML metadata |
-| `ref rename` | Change a citation key |
-| `ref remove` / `ref rm` | Remove a reference and its files |
-| `ref clean` | Find and remove unused references |
-| `ref import` | Import a BibTeX/BibLaTeX bibliography |
-| `ref export` | Generate BibLaTeX |
-| `ref doctor` | Validate repository health and completeness |
-| `ref help` | Show top-level or command-specific help |
+| Command                 | Purpose                                                |
+| ----------------------- | ------------------------------------------------------ |
+| `ref init`              | Initialize a `.ref` repository                         |
+| `ref add`               | Add a reference with a PDF, without one, or from a DOI |
+| `ref list`              | List stored references                                 |
+| `ref search`            | Search bibliographic metadata                          |
+| `ref last`              | Print recently added citation keys                     |
+| `ref show`              | Show one exact citation key                            |
+| `ref open`              | Open a reference's source PDF                          |
+| `ref attach`            | Attach a PDF to an existing reference                  |
+| `ref edit`              | Edit YAML metadata                                     |
+| `ref rename`            | Change a citation key                                  |
+| `ref remove` / `ref rm` | Remove a reference and its files                       |
+| `ref clean`             | Find and remove unused references                      |
+| `ref import`            | Import a BibTeX/BibLaTeX bibliography                  |
+| `ref export`            | Generate BibLaTeX                                      |
+| `ref doctor`            | Validate repository health and completeness            |
+| `ref help`              | Show top-level or command-specific help                |
 
 Run `ref <command> --help` (or `ref help <command>`) for complete argument and option help.
 
