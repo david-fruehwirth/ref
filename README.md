@@ -243,14 +243,28 @@ ref add paper.pdf \
 
 ### `ref list`
 
-List references as readable blocks headed by their citation keys. Sort by `key`
-(the default), `year`, `author`, or `title`:
+List references as readable blocks headed by their citation keys. With no filter,
+all references are listed; `--all` makes that default explicit. Sort by `key` (the
+default), `year`, `author`, or `title`:
 
 ```bash
 ref list
+ref list --all
 ref list --sort year
 ref list --sort author
+ref list --used
+ref list --unused --no-pdf
+ref list --used --pdf
+ref list --pdf --json
 ```
+
+`--used` detects citation keys in eligible writing files below the current
+directory, using the same downward scope, token matching, and exclusions as
+[`ref clean`](#ref-clean). `--unused` selects the complement. `--pdf` requires a
+valid, non-empty canonical `paper.pdf`; `--no-pdf` includes missing, unreadable,
+empty, or otherwise invalid PDF paths. A usage filter and PDF filter compose with
+logical AND. `--used`/`--unused` and `--pdf`/`--no-pdf` are exclusive pairs, and
+`--all` cannot be combined with any filter.
 
 ```text
 Smith2024Attention

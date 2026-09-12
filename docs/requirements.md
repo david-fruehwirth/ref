@@ -117,6 +117,36 @@ Interactive add shall not prompt for a publication year when a year was supplied
 ### REQ-021: Listing
 
 `ref list` shall report stored references through the common output interface.
+With no filter it shall list every reference; `--all` shall explicitly select the
+same set.
+
+### REQ-076: List usage filters
+
+`ref list --used` shall include references whose citation keys occur in eligible
+text files below the invocation directory, and `--unused` shall include the
+complement. Detection, token boundaries, downward scope, ignored paths, supported
+files, and incomplete-scan safety shall be identical to `ref clean`.
+
+### REQ-077: List source-PDF filters
+
+`ref list --pdf` shall include only references whose canonical `paper.pdf` is a
+readable, non-empty regular file according to the repository source-proof check.
+`--no-pdf` shall include its complement, including missing, unreadable, empty, and
+non-file canonical paths.
+
+### REQ-078: List filter composition and conflicts
+
+One usage filter and one PDF filter may be combined, with logical AND semantics.
+`--used` and `--unused` are mutually exclusive; `--pdf` and `--no-pdf` are
+mutually exclusive; and `--all` cannot be combined with another filter. Invalid
+combinations shall fail during argument parsing with an actionable diagnostic.
+
+### REQ-079: Filtered list presentation
+
+Filtering shall not change the established human reference-summary format or the
+versioned list JSON schema. JSON shall contain no ANSI formatting. Empty human
+results shall produce no reference blocks, and empty JSON results shall contain a
+zero `reference_count` and an empty `references` array.
 
 ### REQ-022: Searching
 
