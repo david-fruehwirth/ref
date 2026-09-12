@@ -57,17 +57,25 @@ thesis/
 ├── .git/
 ├── .ref/
 │   ├── config.yaml
-│   └── refs/
+│   ├── refs/
 │       ├── Rocchio1971RelevanceFeedback/
-│       │   ├── ref.yaml
-│       │   └── paper.pdf
+│       │   └── ref.yaml
 │       └── Smith2024AttentionModels/
 │           └── ref.yaml
+│   └── source/
+│       └── Rocchio1971RelevanceFeedback.pdf
 ├── thesis.tex
 └── references.bib
 ```
 
-The reference directory name is its citation key and canonical identity. `ref.yaml` is authoritative bibliographic metadata; `paper.pdf` is the optional canonical source attachment. A representative metadata file is:
+The reference directory name is its citation key and canonical identity. `ref.yaml`
+is authoritative metadata and records only a managed PDF's filename. The default
+configuration and a representative metadata file include:
+
+```yaml
+version: 1
+pdf_directory: source
+```
 
 ```yaml
 type: article
@@ -87,6 +95,7 @@ tags:
   - recommender-systems
 notes: |
   Relevant to the methodology section.
+pdf_filename: Example2024Paper.pdf
 ```
 
 These field names are part of the stored format. Manual editing of `.ref/refs/<key>/ref.yaml` is supported, either directly or with `ref edit <key>`; run `ref doctor` afterward to detect many mistakes. Use `ref rename` rather than manually renaming a reference directory.
@@ -128,7 +137,26 @@ Automatic generation requires a first author and year. `--key` overrides generat
 
 A reference may exist without a PDF, especially after `ref import`, `ref add --no-pdf`, or DOI lookup. Add one later with `ref attach`. Both `add` and `attach` copy the PDF into the repository without deleting or changing the source, and neither silently overwrites an existing reference attachment.
 
-`ref doctor` reports a missing source PDF as a warning. An empty or non-file `paper.pdf` is an error. `ref doctor --strict` is therefore useful as a final thesis-quality check requiring a canonical local source artifact for every reference.
+`pdf_directory` defaults to `source`. Relative paths are resolved from `.ref`;
+absolute paths are supported when PDFs should live elsewhere. The directory is
+created lazily on the first PDF write. Each PDF is named `<citation-key>.pdf`, and
+`ref.yaml` stores only that basename in `pdf_filename` (omitted for references
+without PDFs).
+
+`ref doctor` reports a missing source PDF as a warning. An unreadable, empty, or
+non-file resolved PDF is an error. `ref doctor --strict` is therefore useful as a
+final thesis-quality check requiring a canonical local source artifact for every
+reference.
+
+Repositories from versions that stored `.ref/refs/<key>/paper.pdf` require an
+explicit migration. Preview every move, then apply it:
+
+```bash
+ref migrate-pdfs --dry-run
+ref migrate-pdfs
+```
+
+Migration refuses destination collisions and never overwrites an existing file.
 
 A PDF indicates only local source availability. Its presence does not establish that it is the correct publication, was read, supports a claim, or is scientifically valid.
 
@@ -187,6 +215,7 @@ ref search attention --json |
 | `ref rename`            | Change a citation key                                  |
 | `ref remove` / `ref rm` | Remove a reference and its files                       |
 | `ref clean`             | Find and remove unused references                      |
+| `ref migrate-pdfs`      | Migrate legacy per-reference PDFs safely                  |
 | `ref import`            | Import a BibTeX/BibLaTeX bibliography                  |
 | `ref export`            | Generate BibLaTeX                                      |
 | `ref doctor`            | Validate repository health and completeness            |
@@ -261,7 +290,7 @@ ref list --pdf --json
 `--used` detects citation keys in eligible writing files below the current
 directory, using the same downward scope, token matching, and exclusions as
 [`ref clean`](#ref-clean). `--unused` selects the complement. `--pdf` requires a
-valid, non-empty canonical `paper.pdf`; `--no-pdf` includes missing, unreadable,
+valid, non-empty PDF resolved through `pdf_directory`; `--no-pdf` includes missing, unreadable,
 empty, or otherwise invalid PDF paths. A usage filter and PDF filter compose with
 logical AND. `--used`/`--unused` and `--pdf`/`--no-pdf` are exclusive pairs, and
 `--all` cannot be combined with any filter.
@@ -313,7 +342,7 @@ ref show Rocchio1971RelevanceFeedback
 
 ### `ref open`
 
-Open `.ref/refs/<key>/paper.pdf` in the operating system's default application:
+Open the configured `<pdf_directory>/<key>.pdf` in the operating system's default application:
 
 ```bash
 ref open Rocchio1971RelevanceFeedback
@@ -329,7 +358,7 @@ Copy a non-empty PDF onto an existing reference that does not already have one:
 ref attach Smith2024Attention ~/Downloads/paper.pdf
 ```
 
-The canonical destination is `paper.pdf`. The source is untouched, and an existing destination is never overwritten.
+The canonical destination is `<pdf_directory>/<key>.pdf`; `ref.yaml` records only that basename. The source is untouched, and an existing destination is never overwritten.
 
 ### `ref edit`
 
@@ -353,7 +382,7 @@ Both keys are exact. Existing keys are never overwritten. **Rename does not rewr
 
 ### `ref remove`
 
-Delete the complete reference directory, including `ref.yaml`, `paper.pdf`, and any other files it contains:
+Delete the reference metadata and its exact configured managed PDF:
 
 ```bash
 ref remove Smith2024Attention
@@ -474,7 +503,7 @@ git add .ref
 git commit -m "Add references for attention section"
 ```
 
-Metadata diffs are readable, citation identity is visible in paths, and no hidden database must be synchronized. Whether to commit `paper.pdf` files is a project decision; `ref` does not automatically add them to `.gitignore`.
+Metadata diffs are readable, citation identity is visible in paths, and no hidden database must be synchronized. Whether to commit managed PDF files is a project decision; `ref` does not automatically add them to `.gitignore`.
 
 ## CI and validation
 

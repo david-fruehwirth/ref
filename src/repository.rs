@@ -9,6 +9,12 @@ use std::{
 #[derive(Deserialize, Serialize)]
 struct Config {
     version: u8,
+    #[serde(default = "default_pdf_directory")]
+    pdf_directory: PathBuf,
+}
+
+fn default_pdf_directory() -> PathBuf {
+    PathBuf::from("source")
 }
 
 #[derive(Clone, Debug)]
@@ -17,6 +23,8 @@ pub struct StoredReference {
     pub metadata: Reference,
     pub path: PathBuf,
     pub has_pdf: bool,
+    pub pdf_filename: Option<String>,
+    pub pdf_path: Option<PathBuf>,
     /// Operational creation metadata; absent for repositories created by older versions.
     pub added_at: Option<String>,
 }
@@ -33,6 +41,13 @@ pub enum SourceProofStatus {
     Invalid(String),
 }
 
+#[derive(Clone, Debug)]
+pub struct PdfMigration {
+    pub key: CitationKey,
+    pub from: PathBuf,
+    pub to: PathBuf,
+}
+
 impl Repository {
     pub fn init(project: &Path) -> Result<Self> {
         let root = project.join(".ref");
@@ -43,7 +58,10 @@ impl Repository {
             .prefix(".ref-init-")
             .tempdir_in(project)?;
         fs::create_dir(tmp.path().join("refs"))?;
-        fs::write(tmp.path().join("config.yaml"), "version: 1\n")?;
+        fs::write(
+            tmp.path().join("config.yaml"),
+            "version: 1\npdf_directory: source\n",
+        )?;
         let temp_path = tmp.keep();
         fs::rename(&temp_path, &root)
             .with_context(|| format!("failed to initialize {}", root.display()))?;
@@ -73,25 +91,57 @@ impl Repository {
         self.reference_path(key).is_dir()
     }
 
+    fn config(&self) -> Result<Config> {
+        let path = self.root.join("config.yaml");
+        serde_yaml::from_str(
+            &fs::read_to_string(&path).with_context(|| format!("missing {}", path.display()))?,
+        )
+        .with_context(|| format!("invalid {}", path.display()))
+    }
+
+    pub fn pdf_directory(&self) -> Result<PathBuf> {
+        let configured = self.config()?.pdf_directory;
+        let path = if configured.is_absolute() {
+            configured
+        } else {
+            self.root.join(configured)
+        };
+        if path.exists() && !path.is_dir() {
+            bail!("configured PDF directory `{}` exists but is not a directory\nhint: update `pdf_directory` in {}", path.display(), self.root.join("config.yaml").display());
+        }
+        Ok(path)
+    }
+
+    pub fn pdf_path(&self, key: &CitationKey, filename: &str) -> Result<PathBuf> {
+        let expected = format!("{key}.pdf");
+        if filename != expected || Path::new(filename).file_name() != Some(filename.as_ref()) {
+            bail!(
+                "invalid pdf_filename `{filename}` for reference `{key}` (expected `{expected}`)"
+            );
+        }
+        Ok(self.pdf_directory()?.join(filename))
+    }
+
     /// Inspect the canonical source artifact. `metadata` follows symlinks, which
     /// keeps this policy consistent with opening an attachment via `is_file`.
     pub fn source_proof_status(&self, key: &CitationKey) -> SourceProofStatus {
-        let path = self.reference_path(key).join("paper.pdf");
-        match fs::metadata(&path) {
-            Ok(metadata) if !metadata.is_file() => {
-                SourceProofStatus::Invalid("expected a regular file".into())
+        let loaded = match self.load_reference(key) {
+            Ok(reference) => reference,
+            Err(error) => return SourceProofStatus::Invalid(error.to_string()),
+        };
+        let Some(path) = loaded.pdf_path else {
+            return SourceProofStatus::Missing;
+        };
+        inspect_pdf(path)
+    }
+
+    pub fn source_pdf_path(&self, key: &CitationKey) -> Result<PathBuf> {
+        match self.source_proof_status(key) {
+            SourceProofStatus::Present(path) => Ok(path),
+            SourceProofStatus::Missing => bail!("reference `{key}` has no PDF"),
+            SourceProofStatus::Invalid(reason) => {
+                bail!("reference `{key}` has no available PDF: {reason}")
             }
-            Ok(metadata) if metadata.len() == 0 => {
-                SourceProofStatus::Invalid("file is empty".into())
-            }
-            Ok(_) => match fs::File::open(&path) {
-                Ok(_) => SourceProofStatus::Present(path),
-                Err(error) => SourceProofStatus::Invalid(format!("cannot read file: {error}")),
-            },
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                SourceProofStatus::Missing
-            }
-            Err(error) => SourceProofStatus::Invalid(format!("cannot inspect file: {error}")),
         }
     }
 
@@ -114,33 +164,49 @@ impl Repository {
         if fs::metadata(source)?.len() == 0 {
             bail!("PDF `{}` is empty", source.display());
         }
-        let destination = self.reference_path(key).join("paper.pdf");
-        if destination.exists() {
+        let mut reference = self.load_reference(key)?;
+        if reference.pdf_filename.is_some() {
             bail!("reference `{key}` already has a source PDF");
         }
-        let mut temporary = tempfile::NamedTempFile::new_in(self.reference_path(key))?;
+        let directory = self.pdf_directory()?;
+        fs::create_dir_all(&directory).with_context(|| {
+            format!(
+                "failed to create configured PDF directory {}",
+                directory.display()
+            )
+        })?;
+        let filename = format!("{key}.pdf");
+        let destination = directory.join(&filename);
+        if destination.exists() {
+            bail!(
+                "PDF destination `{}` already exists; refusing to overwrite it",
+                destination.display()
+            );
+        }
+        let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
         let mut input = fs::File::open(source)?;
         std::io::copy(&mut input, &mut temporary)?;
         temporary
             .persist_noclobber(&destination)
             .map_err(|error| error.error)
             .with_context(|| format!("failed to attach source PDF to `{key}`"))?;
+        reference.pdf_filename = Some(filename);
+        if let Err(error) = self.write_stored_metadata(&reference) {
+            let _ = fs::remove_file(&destination);
+            return Err(error);
+        }
         Ok(())
     }
 
     pub fn validate_structure(&self) -> Result<()> {
-        let config_path = self.root.join("config.yaml");
-        let config: Config = serde_yaml::from_str(
-            &fs::read_to_string(&config_path)
-                .with_context(|| format!("missing {}", config_path.display()))?,
-        )
-        .with_context(|| format!("invalid {}", config_path.display()))?;
+        let config = self.config()?;
         if config.version != 1 {
             bail!("unsupported repository version {}", config.version);
         }
         if !self.references_dir().is_dir() {
             bail!("missing {}", self.references_dir().display());
         }
+        self.pdf_directory()?;
         Ok(())
     }
 
@@ -152,15 +218,27 @@ impl Repository {
         let yaml = path.join("ref.yaml");
         let contents = fs::read_to_string(&yaml)
             .with_context(|| format!("failed to read {}", yaml.display()))?;
-        let (metadata, added_at) = parse_reference_yaml(&contents)
+        let (metadata, added_at, pdf_filename) = parse_reference_yaml(&contents)
             .with_context(|| format!("failed to parse {}", yaml.display()))?;
         metadata
             .validate()
             .with_context(|| format!("invalid metadata in {}", yaml.display()))?;
+        if pdf_filename.is_none() && path.join("paper.pdf").exists() {
+            bail!("legacy per-reference PDF found for `{key}`; run `ref migrate-pdfs --dry-run`, then `ref migrate-pdfs`");
+        }
+        let pdf_path = pdf_filename
+            .as_deref()
+            .map(|name| self.pdf_path(key, name))
+            .transpose()?;
+        let has_pdf = pdf_path
+            .as_ref()
+            .is_some_and(|path| matches!(inspect_pdf(path.clone()), SourceProofStatus::Present(_)));
         Ok(StoredReference {
             key: key.clone(),
             metadata,
-            has_pdf: path.join("paper.pdf").is_file(),
+            has_pdf,
+            pdf_filename,
+            pdf_path,
             path,
             added_at,
         })
@@ -213,15 +291,40 @@ impl Repository {
                 serde_yaml::Value::String("added_at".into()),
                 serde_yaml::Value::String(utc_now()?),
             );
+        let filename = pdf.map(|_| format!("{key}.pdf"));
+        if let Some(filename) = &filename {
+            value.as_mapping_mut().unwrap().insert(
+                serde_yaml::Value::String("pdf_filename".into()),
+                serde_yaml::Value::String(filename.clone()),
+            );
+        }
         fs::write(tmp.path().join("ref.yaml"), serde_yaml::to_string(&value)?)?;
+        let mut committed_pdf = None;
         if let Some(pdf) = pdf {
-            fs::copy(pdf, tmp.path().join("paper.pdf"))?;
+            let directory = self.pdf_directory()?;
+            fs::create_dir_all(&directory)?;
+            let destination = directory.join(filename.as_ref().unwrap());
+            if destination.exists() {
+                bail!(
+                    "PDF destination `{}` already exists; refusing to overwrite it",
+                    destination.display()
+                );
+            }
+            let mut staged = tempfile::NamedTempFile::new_in(&directory)?;
+            std::io::copy(&mut fs::File::open(pdf)?, &mut staged)?;
+            staged
+                .persist_noclobber(&destination)
+                .map_err(|e| e.error)?;
+            committed_pdf = Some(destination);
         }
         let temp_path = tmp.keep();
         if let Err(error) = fs::rename(&temp_path, self.reference_path(key)) {
             // `TempDir::keep` transfers cleanup responsibility to us. Never leave
             // an import/add staging directory behind after a failed atomic commit.
             let _ = fs::remove_dir_all(&temp_path);
+            if let Some(pdf) = committed_pdf {
+                let _ = fs::remove_file(pdf);
+            }
             return Err(error).context("failed to commit reference");
         }
         Ok(())
@@ -234,7 +337,33 @@ impl Repository {
         if self.contains(new) {
             bail!("reference `{new}` already exists");
         }
+        let mut reference = self.load_reference(old)?;
+        let old_pdf = reference.pdf_path.clone();
+        let new_pdf = old_pdf
+            .as_ref()
+            .map(|_| self.pdf_directory().map(|d| d.join(format!("{new}.pdf"))))
+            .transpose()?;
+        if new_pdf.as_ref().is_some_and(|p| p.exists()) {
+            bail!(
+                "PDF destination `{}` already exists; refusing to overwrite it",
+                new_pdf.as_ref().unwrap().display()
+            );
+        }
         fs::rename(self.reference_path(old), self.reference_path(new))?;
+        reference.key = new.clone();
+        if let (Some(from), Some(to)) = (&old_pdf, &new_pdf) {
+            if let Err(error) = fs::rename(from, to) {
+                let _ = fs::rename(self.reference_path(new), self.reference_path(old));
+                return Err(error).context("failed to rename source PDF");
+            }
+            reference.pdf_filename = Some(format!("{new}.pdf"));
+            reference.pdf_path = Some(to.clone());
+            if let Err(error) = self.write_stored_metadata(&reference) {
+                let _ = fs::rename(to, from);
+                let _ = fs::rename(self.reference_path(new), self.reference_path(old));
+                return Err(error);
+            }
+        }
         Ok(())
     }
 
@@ -242,12 +371,127 @@ impl Repository {
         if !self.contains(key) {
             bail!("reference `{key}` does not exist");
         }
+        let reference = self.load_reference(key)?;
+        if let Some(pdf) = reference.pdf_path {
+            if pdf.exists() {
+                fs::remove_file(&pdf)
+                    .with_context(|| format!("failed to remove source PDF {}", pdf.display()))?;
+            }
+        }
         fs::remove_dir_all(self.reference_path(key))?;
+        Ok(())
+    }
+
+    /// Plan or perform the explicit migration from the legacy per-reference layout.
+    pub fn migrate_pdfs(&self, dry_run: bool) -> Result<Vec<PdfMigration>> {
+        self.validate_structure()?;
+        let directory = self.pdf_directory()?;
+        let mut changes = Vec::new();
+        for entry in fs::read_dir(self.references_dir())? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let key = CitationKey::new(
+                entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| anyhow!("non-UTF-8 reference directory"))?,
+            )?;
+            let from = entry.path().join("paper.pdf");
+            if !from.exists() {
+                continue;
+            }
+            if !from.is_file() {
+                bail!("legacy PDF `{}` is not a regular file", from.display());
+            }
+            let to = directory.join(format!("{key}.pdf"));
+            if to.exists() {
+                bail!(
+                    "migration destination `{}` already exists; no files were changed",
+                    to.display()
+                );
+            }
+            let text = fs::read_to_string(entry.path().join("ref.yaml"))?;
+            let (_, _, filename) = parse_reference_yaml(&text)?;
+            if filename.is_some() {
+                bail!("reference `{key}` has both legacy PDF storage and pdf_filename; resolve this conflict manually");
+            }
+            changes.push(PdfMigration { key, from, to });
+        }
+        changes.sort_by(|a, b| a.key.cmp(&b.key));
+        if dry_run || changes.is_empty() {
+            return Ok(changes);
+        }
+        fs::create_dir_all(&directory)?;
+        for change in &changes {
+            fs::rename(&change.from, &change.to).with_context(|| {
+                format!(
+                    "failed to move `{}`; the original PDF was not deleted",
+                    change.from.display()
+                )
+            })?;
+            let yaml = self.reference_path(&change.key).join("ref.yaml");
+            let text = fs::read_to_string(&yaml)?;
+            let (metadata, added_at, _) = parse_reference_yaml(&text)?;
+            let stored = StoredReference {
+                key: change.key.clone(),
+                metadata,
+                path: self.reference_path(&change.key),
+                has_pdf: true,
+                pdf_filename: Some(format!("{}.pdf", change.key)),
+                pdf_path: Some(change.to.clone()),
+                added_at,
+            };
+            if let Err(error) = self.write_stored_metadata(&stored) {
+                let _ = fs::rename(&change.to, &change.from);
+                return Err(error).context(format!(
+                    "failed to update metadata for `{}`; its PDF was restored",
+                    change.key
+                ));
+            }
+        }
+        Ok(changes)
+    }
+
+    fn write_stored_metadata(&self, reference: &StoredReference) -> Result<()> {
+        let mut value = serde_yaml::to_value(&reference.metadata)?;
+        let map = value
+            .as_mapping_mut()
+            .context("reference metadata did not serialize as a mapping")?;
+        if let Some(added) = &reference.added_at {
+            map.insert("added_at".into(), added.clone().into());
+        }
+        if let Some(filename) = &reference.pdf_filename {
+            map.insert("pdf_filename".into(), filename.clone().into());
+        }
+        let path = self.reference_path(&reference.key).join("ref.yaml");
+        let mut temporary = tempfile::NamedTempFile::new_in(self.reference_path(&reference.key))?;
+        use std::io::Write;
+        temporary.write_all(serde_yaml::to_string(&value)?.as_bytes())?;
+        temporary.persist(&path).map_err(|e| e.error)?;
         Ok(())
     }
 }
 
-pub(crate) fn parse_reference_yaml(contents: &str) -> Result<(Reference, Option<String>)> {
+fn inspect_pdf(path: PathBuf) -> SourceProofStatus {
+    match fs::metadata(&path) {
+        Ok(metadata) if !metadata.is_file() => {
+            SourceProofStatus::Invalid("expected a regular file".into())
+        }
+        Ok(metadata) if metadata.len() == 0 => SourceProofStatus::Invalid("file is empty".into()),
+        Ok(_) => match fs::File::open(&path) {
+            Ok(_) => SourceProofStatus::Present(path),
+            Err(error) => SourceProofStatus::Invalid(format!("cannot read file: {error}")),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => SourceProofStatus::Missing,
+        Err(error) => SourceProofStatus::Invalid(format!("cannot inspect file: {error}")),
+    }
+}
+
+pub(crate) fn parse_reference_yaml(
+    contents: &str,
+) -> Result<(Reference, Option<String>, Option<String>)> {
     let mut value: serde_yaml::Value = serde_yaml::from_str(contents)?;
     let added_at = value
         .as_mapping_mut()
@@ -257,7 +501,12 @@ pub(crate) fn parse_reference_yaml(contents: &str) -> Result<(Reference, Option<
     if let Some(timestamp) = &added_at {
         validate_utc_timestamp(timestamp)?;
     }
-    Ok((serde_yaml::from_value(value)?, added_at))
+    let pdf_filename = value
+        .as_mapping_mut()
+        .and_then(|mapping| mapping.remove(serde_yaml::Value::String("pdf_filename".into())))
+        .map(serde_yaml::from_value::<String>)
+        .transpose()?;
+    Ok((serde_yaml::from_value(value)?, added_at, pdf_filename))
 }
 
 fn validate_utc_timestamp(value: &str) -> Result<()> {

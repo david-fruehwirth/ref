@@ -4,7 +4,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input};
 use output::{
     BatchDiagnostic, CommandOutput, DiagnosticOutput, OperationStatus, OutputFormat,
-    RecentReferenceOutput, ReferenceOutput, WarningOutput,
+    PdfMigrationOutput, RecentReferenceOutput, ReferenceOutput, WarningOutput,
 };
 use r#ref::{
     clean,
@@ -111,7 +111,7 @@ enum Commands {
     },
     /// Open a reference's source PDF in the system viewer
     #[command(
-        long_about = "Open .ref/refs/<KEY>/paper.pdf in the operating system's default application. The command fails when the exact citation key does not exist or has no source PDF."
+        long_about = "Open the PDF resolved from pdf_directory and the reference's pdf_filename in the operating system's default application. The command fails when the exact citation key does not exist or has no source PDF."
     )]
     Open {
         /// Exact citation key whose source PDF should be opened
@@ -119,7 +119,7 @@ enum Commands {
     },
     /// Attach a source PDF to an existing reference
     #[command(
-        long_about = "Attach a source PDF to an existing reference that has no attachment.\n\nThe PDF is copied to .ref/refs/<KEY>/paper.pdf. The source remains untouched, and an existing source PDF is never overwritten.",
+        long_about = "Attach a source PDF to an existing reference that has no attachment.\n\nThe PDF is copied to the configured PDF directory as <KEY>.pdf and ref.yaml stores that filename. The source remains untouched, and an existing source PDF is never overwritten.",
         after_help = "Example:\n  ref attach Smith2024Attention ~/Downloads/paper.pdf"
     )]
     Attach {
@@ -150,7 +150,7 @@ enum Commands {
     /// Remove a reference and its attached files
     #[command(
         alias = "rm",
-        long_about = "Remove a reference's entire directory, including ref.yaml, its source PDF, and any other attached files.\n\nThe exact citation key must be confirmed unless --yes is supplied. Non-interactive use requires --yes.",
+        long_about = "Remove a reference's metadata directory and its exact PDF in the configured PDF directory.\n\nThe exact citation key must be confirmed unless --yes is supplied. Non-interactive use requires --yes.",
         after_help = "Examples:\n  ref remove Smith2024Attention\n  ref rm Smith2024Attention\n  ref remove Smith2024Attention --yes"
     )]
     Remove {
@@ -187,6 +187,16 @@ enum Commands {
     Import {
         /// BibTeX or BibLaTeX bibliography file
         file: PathBuf,
+    },
+    /// Migrate legacy per-reference PDFs to configured storage
+    #[command(
+        long_about = "Move legacy .ref/refs/<KEY>/paper.pdf files into the configured PDF directory, rename them to <KEY>.pdf, and update ref.yaml. Always preview the complete plan with --dry-run first.",
+        after_help = "Examples:\n  ref migrate-pdfs --dry-run\n  ref migrate-pdfs"
+    )]
+    MigratePdfs {
+        /// Report planned changes without modifying files
+        #[arg(long, short = 'n')]
+        dry_run: bool,
     },
     /// Check repository integrity and source completeness
     #[command(
@@ -438,6 +448,7 @@ fn command_name(c: &Commands) -> &'static str {
         Commands::Clean(_) => "clean",
         Commands::Export { .. } => "export",
         Commands::Import { .. } => "import",
+        Commands::MigratePdfs { .. } => "migrate-pdfs",
         Commands::Doctor { .. } => "doctor",
     }
 }
@@ -480,7 +491,10 @@ fn execute(command: Commands, format: OutputFormat) -> Result<Execution> {
             let repo = repo()?;
             let key = CitationKey::new(key)?;
             let r = repo.load_reference(&key)?;
-            let path = r.path.join("paper.pdf");
+            let path = r
+                .pdf_path
+                .clone()
+                .context(format!("reference `{key}` has no PDF"))?;
             launch::open_reference(&repo, &key, &SystemOpener)?;
             Execution::success(
                 "open",
@@ -499,7 +513,10 @@ fn execute(command: Commands, format: OutputFormat) -> Result<Execution> {
                 "attach",
                 CommandOutput::Attach {
                     citation_key: key.to_string(),
-                    source_pdf_path: repo.reference_path(&key).join("paper.pdf"),
+                    source_pdf_path: repo
+                        .load_reference(&key)?
+                        .pdf_path
+                        .context("attached PDF path missing")?,
                 },
             )
         }
@@ -543,6 +560,23 @@ fn execute(command: Commands, format: OutputFormat) -> Result<Execution> {
         Commands::Clean(a) => clean_cmd(&repo()?, a, format)?,
         Commands::Export { format: f, output } => export_cmd(&repo()?, &f, output.as_deref())?,
         Commands::Import { file } => import_cmd(&repo()?, &file)?,
+        Commands::MigratePdfs { dry_run } => {
+            let changes = repo()?.migrate_pdfs(dry_run)?;
+            Execution::success(
+                "migrate-pdfs",
+                CommandOutput::MigratePdfs {
+                    dry_run,
+                    changes: changes
+                        .into_iter()
+                        .map(|c| PdfMigrationOutput {
+                            citation_key: c.key.to_string(),
+                            source_path: c.from,
+                            destination_path: c.to,
+                        })
+                        .collect(),
+                },
+            )
+        }
         Commands::Doctor { strict } => doctor_cmd(&repo()?, strict)?,
     })
 }

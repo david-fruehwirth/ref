@@ -55,9 +55,7 @@ net for errors introduced through such edits.
 ### Version-control-friendly conventions
 
 A one-reference metadata edit should normally change one small YAML file and
-produce a meaningful Git diff. Generated output SHOULD be deterministic. Prefer
-the fixed layout `refs/<key>/ref.yaml` and `refs/<key>/paper.pdf` to configurable
-storage paths. Repository-wide configuration is intentionally sparse.
+produce a meaningful Git diff. Generated output SHOULD be deterministic. Prefer the fixed metadata layout `refs/<key>/ref.yaml`; PDF storage has the single repository-wide `pdf_directory` setting. Repository-wide configuration is intentionally sparse.
 
 ### Composable CLI, small scope
 
@@ -149,12 +147,13 @@ project/
 ├── .git/
 ├── .ref/
 │   ├── config.yaml
-│   └── refs/
+│   ├── refs/
 │       ├── rocchio1971/
-│       │   ├── ref.yaml
-│       │   └── paper.pdf
+│       │   └── ref.yaml
 │       └── lops2011/
 │           └── ref.yaml
+│   └── source/
+│       └── rocchio1971.pdf
 ├── thesis.tex
 └── references.bib
 ```
@@ -164,8 +163,9 @@ project/
 - `.ref/refs/` contains one directory per reference.
 - The directory name is the citation key and canonical identity.
 - `ref.yaml` is authoritative bibliographic and local metadata.
-- `paper.pdf` is the optional canonical attachment. Exactly one PDF is currently
-  supported per reference.
+- `pdf_filename` in `ref.yaml` names the optional canonical attachment. PDFs live
+  in the configured `pdf_directory` (`source` by default). Exactly one PDF is
+  currently supported per reference.
 
 ### The filesystem is part of the public interface
 
@@ -190,7 +190,7 @@ need. It MUST never become a source of truth.
 ### Authoritative versus derived state
 
 Authoritative state is `.ref/config.yaml`, each
-`.ref/refs/<key>/ref.yaml`, and optional reference attachments. Derived state
+`.ref/refs/<key>/ref.yaml`, and optional reference attachments in the configured PDF directory. Derived state
 includes exported `references.bib`, terminal tables, search results, and any future
 cache or index. Derived state MUST be reproducible from authoritative state.
 
@@ -421,8 +421,7 @@ and diagnostics identify affected citation keys. Never rely on color alone.
 
 `doctor` is the integrity boundary for human-editable storage. It validates the
 repository version and layout and diagnoses invalid keys, missing/malformed YAML,
-invalid domain metadata, malformed or duplicate DOIs, and broken `paper.pdf`
-entries. A missing PDF is valid repository state but is a source-quality warning.
+invalid domain metadata, malformed or duplicate DOIs, and broken configured PDF entries. A missing PDF is valid repository state but is a source-quality warning.
 Missing recommended fields such as authors or year are also warnings; `doctor
 --strict` turns warnings into failure for stronger CI policy.
 
@@ -434,17 +433,16 @@ underlying publication was locally available for inspection. Bibliographic
 metadata and source availability are therefore separate concerns.
 
 A reference may validly exist without an attachment, especially after BibTeX
-import, DOI lookup, or `ref add --no-pdf`. For the current repository format, a
-non-empty canonical `paper.pdf` is the source proof. `ref doctor` evaluates both
+import, DOI lookup, or `ref add --no-pdf`. For the current repository format, a non-empty PDF resolved from `pdf_directory` and `pdf_filename` is the source proof. `ref doctor` evaluates both
 structural integrity and repository quality expectations: it reports a missing
-source PDF as a warning, while an empty or non-file `paper.pdf` is an error.
+source PDF as a warning, while an empty or non-file resolved PDF is an error.
 `ref doctor --strict` can consequently serve as a thesis-quality gate requiring
 locally available source material for every reference.
 
 PDF presence proves only that a source artifact is available. It does not prove
 that it is the correct publication, was read or interpreted correctly, is
 scientifically valid, or supports any particular claim. Richer evidence types may
-be considered in the future without changing the current `paper.pdf` convention.
+be considered in the future without changing the current configured PDF convention.
 
 ## Testing Philosophy
 

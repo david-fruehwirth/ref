@@ -190,9 +190,20 @@ fn repository_loads_manual_edits_and_derives_identity_from_directory() {
         )
         .unwrap();
     }
+    fs::create_dir(repo.pdf_directory().unwrap()).unwrap();
+    let yaml = repo
+        .reference_path(&CitationKey::new("zeta2024").unwrap())
+        .join("ref.yaml");
     fs::write(
-        repo.reference_path(&CitationKey::new("zeta2024").unwrap())
-            .join("paper.pdf"),
+        &yaml,
+        format!(
+            "{}pdf_filename: zeta2024.pdf\n",
+            fs::read_to_string(&yaml).unwrap()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.pdf_directory().unwrap().join("zeta2024.pdf"),
         b"%PDF tiny",
     )
     .unwrap();
@@ -214,13 +225,11 @@ fn doctor_structures_source_proof_diagnostics_and_counts() {
     for key in ["RefA", "RefB", "RefC", "RefD"] {
         support::add(&repo, key, &support::sample(key, "Smith", Some(2024)));
     }
+    let fixture = temp.path().join("fixture.pdf");
+    fs::write(&fixture, b"deterministic source bytes").unwrap();
     for key in ["RefA", "RefC"] {
-        fs::write(
-            repo.reference_path(&CitationKey::new(key).unwrap())
-                .join("paper.pdf"),
-            b"deterministic source bytes",
-        )
-        .unwrap();
+        repo.attach(&CitationKey::new(key).unwrap(), &fixture)
+            .unwrap();
     }
     fs::write(
         repo.reference_path(&CitationKey::new("RefB").unwrap())
@@ -257,17 +266,22 @@ fn doctor_rejects_empty_and_non_file_source_proof() {
     for key in ["empty", "directory"] {
         support::add(&repo, key, &support::sample(key, "Smith", Some(2024)));
     }
-    fs::write(
-        repo.reference_path(&CitationKey::new("empty").unwrap())
-            .join("paper.pdf"),
-        [],
-    )
-    .unwrap();
-    fs::create_dir(
-        repo.reference_path(&CitationKey::new("directory").unwrap())
-            .join("paper.pdf"),
-    )
-    .unwrap();
+    fs::create_dir(repo.pdf_directory().unwrap()).unwrap();
+    for key in ["empty", "directory"] {
+        let yaml = repo
+            .reference_path(&CitationKey::new(key).unwrap())
+            .join("ref.yaml");
+        fs::write(
+            &yaml,
+            format!(
+                "{}pdf_filename: {key}.pdf\n",
+                fs::read_to_string(&yaml).unwrap()
+            ),
+        )
+        .unwrap();
+    }
+    fs::write(repo.pdf_directory().unwrap().join("empty.pdf"), []).unwrap();
+    fs::create_dir(repo.pdf_directory().unwrap().join("directory.pdf")).unwrap();
     let report = doctor::inspect(&repo).unwrap();
     assert_eq!(report.references_with_source_pdf, 0);
     assert_eq!(report.error_count(), 2);
@@ -298,7 +312,7 @@ fn add_rename_and_remove_preserve_data_and_reject_unsafe_mutations() {
     let loaded = repo.load_reference(&new).unwrap();
     assert_eq!(loaded.metadata, metadata);
     assert_eq!(
-        fs::read(loaded.path.join("paper.pdf")).unwrap(),
+        fs::read(loaded.pdf_path.unwrap()).unwrap(),
         b"%PDF deterministic"
     );
     repo.remove(&new).unwrap();

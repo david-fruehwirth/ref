@@ -47,7 +47,7 @@ fn add_from_doi_uses_normal_no_pdf_persistence_and_detects_duplicates() {
         .is_file());
     assert!(!temp
         .path()
-        .join(".ref/refs/Doe2024ExampleArticle/paper.pdf")
+        .join(".ref/source/Doe2024ExampleArticle.pdf")
         .exists());
     let yaml =
         fs::read_to_string(temp.path().join(".ref/refs/Doe2024ExampleArticle/ref.yaml")).unwrap();
@@ -594,10 +594,7 @@ fn add_without_pdf_uses_metadata_and_rejects_bad_inputs_and_conflicts() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Added Doe2024Example"));
-    assert!(!temp
-        .path()
-        .join(".ref/refs/Doe2024Example/paper.pdf")
-        .exists());
+    assert!(!temp.path().join(".ref/source/Doe2024Example.pdf").exists());
 
     for author in ["John Doe", "John,", ",Doe"] {
         support::command(temp.path())
