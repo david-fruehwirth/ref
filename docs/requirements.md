@@ -46,9 +46,10 @@ a staging directory that appears to be a valid reference.
 
 ### REQ-080: PDF directory configuration
 
-`.ref/config.yaml` shall use `pdf_directory` to configure PDF storage. An absent
-field defaults to `source`; relative values resolve from `.ref`, while absolute
-values are used directly.
+`.ref/config.yaml` shall use the ordered `pdf_directories` list to configure PDF
+storage. An absent field defaults to the single relative directory `source`.
+Relative entries resolve from `.ref`, absolute entries are used directly, and at
+least one entry is required.
 
 ### REQ-081: Lazy PDF directory
 
@@ -58,8 +59,11 @@ exists but is not a directory shall fail with an actionable diagnostic.
 
 ### REQ-082: External PDF directories
 
-All PDF-aware operations shall consistently use an absolute configured directory
-without treating paths outside `.ref` as reference metadata.
+PDF lookup shall check each configured directory in list order for a relative
+`pdf_filename`, then fall back to that filename relative to `.ref`. An absolute
+`pdf_filename` shall bypass configured directories and be checked directly. The
+first readable, non-empty regular file wins. `open`, `doctor`, `show`, `list
+--pdf`, and `list --no-pdf` shall all use this shared resolution.
 
 ## Reference metadata
 
@@ -102,24 +106,25 @@ shall reject competing source modes.
 
 ### REQ-015: PDF copying
 
-Adding a PDF shall copy it to the configured PDF directory as `<citation-key>.pdf`
-without modifying the source file.
+Adding a PDF shall copy it to the first configured PDF directory as
+`<citation-key>.pdf` without modifying the source file.
 
 ### REQ-083: PDF metadata
 
-An attached reference shall store only `pdf_filename: <citation-key>.pdf` in
-`ref.yaml`; a reference without a PDF shall omit that field. Source filenames and
-directory paths shall not be persisted as the PDF filename.
+Newly added or attached PDFs shall store only `pdf_filename:
+<citation-key>.pdf`; a reference without a PDF shall omit that field. Existing
+metadata may contain a plain filename, relative path, or absolute path.
 
 ### REQ-084: Configured PDF persistence
 
-Add and attach shall create the configured directory when needed, copy to the
-key-derived filename, and never overwrite an existing destination.
+Add, attach, and migration shall create the first configured directory when
+needed, copy to the key-derived filename, and never overwrite an existing
+destination.
 
 ### REQ-085: Missing and invalid PDF storage
 
 A missing, unreadable, empty, or non-file resolved PDF shall not count as present.
-A configured path that exists but is not a directory shall prevent PDF-aware
+A configured directory that exists but is not a directory shall prevent PDF-aware
 repository operation with an actionable error.
 
 ### REQ-016: References without PDFs
@@ -228,13 +233,16 @@ Rename shall move a managed PDF to `<new-citation-key>.pdf`, update
 
 ### REQ-086: Configured PDF rename safety
 
-PDF rename and metadata update shall follow the configured directory and attempt
-to restore the original reference and PDF when a later rename step fails.
+PDF rename and metadata update shall apply only to a PDF resolved through a
+configured directory and attempt to restore the original reference and PDF when
+a later rename step fails. Direct relative and absolute fallback PDFs are external
+and shall not be renamed.
 
 ### REQ-087: Configured PDF removal safety
 
-Removal shall delete only the exact validated PDF path derived from the configured
-directory and key-derived `pdf_filename`, then remove the reference directory.
+Removal shall delete only a PDF resolved through a configured directory, then
+remove the reference directory. Direct relative and absolute fallback PDFs are
+external and shall not be deleted.
 
 ### REQ-088: Explicit legacy migration
 
@@ -251,8 +259,8 @@ fails; a failed move shall never delete its source.
 
 ### REQ-090: Repository compatibility
 
-Repositories whose configuration omits `pdf_directory` remain readable using the
-`source` default. Legacy per-reference PDFs require explicit migration and are
+Repositories whose configuration omits `pdf_directories` remain readable using
+the `source` default. Legacy per-reference PDFs require explicit migration and are
 never silently reinterpreted.
 
 ### REQ-030: Confirmed removal

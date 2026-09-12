@@ -74,7 +74,8 @@ configuration and a representative metadata file include:
 
 ```yaml
 version: 1
-pdf_directory: source
+pdf_directories:
+  - source
 ```
 
 ```yaml
@@ -137,11 +138,16 @@ Automatic generation requires a first author and year. `--key` overrides generat
 
 A reference may exist without a PDF, especially after `ref import`, `ref add --no-pdf`, or DOI lookup. Add one later with `ref attach`. Both `add` and `attach` copy the PDF into the repository without deleting or changing the source, and neither silently overwrites an existing reference attachment.
 
-`pdf_directory` defaults to `source`. Relative paths are resolved from `.ref`;
-absolute paths are supported when PDFs should live elsewhere. The directory is
-created lazily on the first PDF write. Each PDF is named `<citation-key>.pdf`, and
-`ref.yaml` stores only that basename in `pdf_filename` (omitted for references
-without PDFs).
+`pdf_directories` is an ordered list that defaults to `source`. Relative entries
+are resolved from `.ref`; absolute entries are supported when PDFs live elsewhere.
+New PDFs are copied to the first directory, which is created lazily, named
+`<citation-key>.pdf`, and stored as that basename in `pdf_filename`.
+
+Existing `pdf_filename` values may be plain names, relative paths, or absolute
+paths. Relative values are searched beneath each configured directory in order,
+then relative to `.ref`; absolute values are checked directly. The first readable,
+non-empty regular file wins. Direct fallback paths are external and are never
+renamed or deleted automatically.
 
 `ref doctor` reports a missing source PDF as a warning. An unreadable, empty, or
 non-file resolved PDF is an error. `ref doctor --strict` is therefore useful as a
@@ -290,7 +296,7 @@ ref list --pdf --json
 `--used` detects citation keys in eligible writing files below the current
 directory, using the same downward scope, token matching, and exclusions as
 [`ref clean`](#ref-clean). `--unused` selects the complement. `--pdf` requires a
-valid, non-empty PDF resolved through `pdf_directory`; `--no-pdf` includes missing, unreadable,
+valid, non-empty PDF resolved through `pdf_directories`; `--no-pdf` includes missing, unreadable,
 empty, or otherwise invalid PDF paths. A usage filter and PDF filter compose with
 logical AND. `--used`/`--unused` and `--pdf`/`--no-pdf` are exclusive pairs, and
 `--all` cannot be combined with any filter.
@@ -342,7 +348,7 @@ ref show Rocchio1971RelevanceFeedback
 
 ### `ref open`
 
-Open the configured `<pdf_directory>/<key>.pdf` in the operating system's default application:
+Open the resolved source PDF in the operating system's default application:
 
 ```bash
 ref open Rocchio1971RelevanceFeedback
@@ -358,7 +364,7 @@ Copy a non-empty PDF onto an existing reference that does not already have one:
 ref attach Smith2024Attention ~/Downloads/paper.pdf
 ```
 
-The canonical destination is `<pdf_directory>/<key>.pdf`; `ref.yaml` records only that basename. The source is untouched, and an existing destination is never overwritten.
+The canonical destination is the first configured PDF directory as `<key>.pdf`; `ref.yaml` records only that basename. The source is untouched, and an existing destination is never overwritten.
 
 ### `ref edit`
 
