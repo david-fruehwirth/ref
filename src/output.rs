@@ -199,6 +199,13 @@ pub struct RecentReferenceOutput {
     pub citation_key: String,
 }
 
+#[derive(Clone, Serialize)]
+pub struct PdfMigrationOutput {
+    pub citation_key: String,
+    pub source_path: PathBuf,
+    pub destination_path: PathBuf,
+}
+
 impl ReferenceOutput {
     pub fn from_stored(r: &r#ref::repository::StoredReference) -> Self {
         let m = &r.metadata;
@@ -225,7 +232,7 @@ impl ReferenceOutput {
             tags: m.tags.clone(),
             notes: m.notes.clone(),
             source_pdf_present: r.has_pdf,
-            source_pdf_path: r.has_pdf.then(|| r.path.join("paper.pdf")),
+            source_pdf_path: r.has_pdf.then(|| r.pdf_path.clone()).flatten(),
         }
     }
 }
@@ -296,6 +303,10 @@ pub enum CommandOutput {
         imported_citation_keys: Vec<String>,
         skipped_references: Vec<BatchDiagnostic>,
         failed_references: Vec<BatchDiagnostic>,
+    },
+    MigratePdfs {
+        dry_run: bool,
+        changes: Vec<PdfMigrationOutput>,
     },
     Clean {
         dry_run: bool,
@@ -397,6 +408,26 @@ impl HumanRenderable for CommandOutput {
                     )?;
                 } else {
                     writeln!(w, "Import complete with errors.\n\nEntries:  {entries_found}\nImported: {references_imported}\nSkipped:  {references_skipped}\nFailed:   {references_failed}")?;
+                }
+            }
+            Self::MigratePdfs { dry_run, changes } => {
+                for change in changes {
+                    writeln!(
+                        w,
+                        "{}: {} -> {}",
+                        change.citation_key,
+                        change.source_path.display(),
+                        change.destination_path.display()
+                    )?;
+                }
+                if *dry_run {
+                    writeln!(
+                        w,
+                        "Dry run: {} PDF(s) would be migrated; no files were changed.",
+                        changes.len()
+                    )?;
+                } else {
+                    writeln!(w, "Migrated {} PDF(s).", changes.len())?;
                 }
             }
             Self::Clean {

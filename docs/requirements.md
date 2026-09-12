@@ -44,6 +44,23 @@ and import shall not overwrite an existing reference.
 A failed reference creation or PDF copy shall leave neither a final reference nor
 a staging directory that appears to be a valid reference.
 
+### REQ-080: PDF directory configuration
+
+`.ref/config.yaml` shall use `pdf_directory` to configure PDF storage. An absent
+field defaults to `source`; relative values resolve from `.ref`, while absolute
+values are used directly.
+
+### REQ-081: Lazy PDF directory
+
+Initialization shall record the default without creating the PDF directory. A PDF
+write shall create a missing configured directory, while a configured path that
+exists but is not a directory shall fail with an actionable diagnostic.
+
+### REQ-082: External PDF directories
+
+All PDF-aware operations shall consistently use an absolute configured directory
+without treating paths outside `.ref` as reference metadata.
+
 ## Reference metadata
 
 ### REQ-008: Human-readable metadata
@@ -85,8 +102,25 @@ shall reject competing source modes.
 
 ### REQ-015: PDF copying
 
-Adding a PDF shall copy it to the canonical `paper.pdf` location without modifying
-the source file.
+Adding a PDF shall copy it to the configured PDF directory as `<citation-key>.pdf`
+without modifying the source file.
+
+### REQ-083: PDF metadata
+
+An attached reference shall store only `pdf_filename: <citation-key>.pdf` in
+`ref.yaml`; a reference without a PDF shall omit that field. Source filenames and
+directory paths shall not be persisted as the PDF filename.
+
+### REQ-084: Configured PDF persistence
+
+Add and attach shall create the configured directory when needed, copy to the
+key-derived filename, and never overwrite an existing destination.
+
+### REQ-085: Missing and invalid PDF storage
+
+A missing, unreadable, empty, or non-file resolved PDF shall not count as present.
+A configured path that exists but is not a directory shall prevent PDF-aware
+repository operation with an actionable error.
 
 ### REQ-016: References without PDFs
 
@@ -129,7 +163,7 @@ files, and incomplete-scan safety shall be identical to `ref clean`.
 
 ### REQ-077: List source-PDF filters
 
-`ref list --pdf` shall include only references whose canonical `paper.pdf` is a
+`ref list --pdf` shall include only references whose configured PDF path is a
 readable, non-empty regular file according to the repository source-proof check.
 `--no-pdf` shall include its complement, including missing, unreadable, empty, and
 non-file canonical paths.
@@ -189,8 +223,37 @@ missing sources and unsafe destination collisions.
 
 ### REQ-029: Rename preservation
 
-Renaming shall move the complete reference directory to the new citation key
-without changing its metadata or attachment contents.
+Rename shall move a managed PDF to `<new-citation-key>.pdf`, update
+`pdf_filename`, and refuse destination collisions without overwriting files.
+
+### REQ-086: Configured PDF rename safety
+
+PDF rename and metadata update shall follow the configured directory and attempt
+to restore the original reference and PDF when a later rename step fails.
+
+### REQ-087: Configured PDF removal safety
+
+Removal shall delete only the exact validated PDF path derived from the configured
+directory and key-derived `pdf_filename`, then remove the reference directory.
+
+### REQ-088: Explicit legacy migration
+
+Repositories containing `.ref/refs/<key>/paper.pdf` without `pdf_filename` shall
+fail normal loading with instructions to run `ref migrate-pdfs`. The migration
+shall move each legacy PDF to configured storage as `<key>.pdf` and update YAML.
+
+### REQ-089: Migration preview and failure safety
+
+`ref migrate-pdfs --dry-run` shall report a deterministic plan without creating,
+moving, or editing files. Migration shall preflight destination collisions, never
+overwrite an existing destination, and restore the old PDF if its metadata update
+fails; a failed move shall never delete its source.
+
+### REQ-090: Repository compatibility
+
+Repositories whose configuration omits `pdf_directory` remain readable using the
+`source` default. Legacy per-reference PDFs require explicit migration and are
+never silently reinterpreted.
 
 ### REQ-030: Confirmed removal
 
@@ -326,7 +389,7 @@ non-numeric page text rather than blindly rewriting it.
 ### REQ-053: Source-proof diagnostics
 
 Doctor shall warn when a reference has no PDF and shall report an empty or
-non-file canonical `paper.pdf` as an error.
+non-file configured PDF path as an error.
 
 ### REQ-054: Structural and metadata diagnostics
 

@@ -19,7 +19,9 @@ pub trait Editor {
 
 pub fn open_reference(repo: &Repository, key: &CitationKey, opener: &dyn FileOpener) -> Result<()> {
     let reference = repo.load_reference(key)?;
-    let pdf = reference.path.join("paper.pdf");
+    let Some(pdf) = reference.pdf_path else {
+        bail!("reference `{key}` has no PDF");
+    };
     if !pdf.is_file() {
         bail!("reference `{key}` has no PDF");
     }

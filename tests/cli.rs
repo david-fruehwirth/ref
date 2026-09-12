@@ -71,7 +71,7 @@ fn pdf_is_copied_and_duplicate_rejected() {
     ];
     cmd(t.path()).args(args).assert().success();
     assert_eq!(
-        fs::read(t.path().join(".ref/refs/x1/paper.pdf")).unwrap(),
+        fs::read(t.path().join(".ref/source/x1.pdf")).unwrap(),
         b"pdf"
     );
     cmd(t.path())
@@ -139,7 +139,7 @@ fn attach_copies_without_overwriting_and_resolves_doctor_warning() {
         .failure()
         .stderr(predicate::str::contains("already has a source PDF"));
     assert_eq!(
-        fs::read(t.path().join(".ref/refs/x/paper.pdf")).unwrap(),
+        fs::read(t.path().join(".ref/source/x.pdf")).unwrap(),
         b"first source"
     );
     assert_eq!(

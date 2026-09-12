@@ -90,12 +90,19 @@ fn pdf_and_no_pdf_partition_by_valid_source_proof() {
         "EmptyPdf",
         &support::sample("EmptyPdf", "Doe", Some(2024)),
     );
+    fs::create_dir_all(repo.pdf_directory().unwrap()).unwrap();
+    let yaml = repo
+        .reference_path(&CitationKey::new("EmptyPdf").unwrap())
+        .join("ref.yaml");
     fs::write(
-        repo.reference_path(&CitationKey::new("EmptyPdf").unwrap())
-            .join("paper.pdf"),
-        b"",
+        &yaml,
+        format!(
+            "{}pdf_filename: EmptyPdf.pdf\n",
+            fs::read_to_string(&yaml).unwrap()
+        ),
     )
     .unwrap();
+    fs::write(repo.pdf_directory().unwrap().join("EmptyPdf.pdf"), b"").unwrap();
     let pdf = support::command(temp.path())
         .args(["list", "--pdf", "--json"])
         .output()

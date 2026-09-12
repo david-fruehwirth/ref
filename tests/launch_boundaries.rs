@@ -66,7 +66,7 @@ fn open_requests_the_references_pdf_without_launching_a_desktop_app() {
 
     assert_eq!(
         &*opener.0.borrow(),
-        &[repo.reference_path(&key).join("paper.pdf")]
+        &[repo.pdf_directory().unwrap().join("paper2024.pdf")]
     );
     assert!(open_reference(&repo, &key, &FailingOpener)
         .unwrap_err()

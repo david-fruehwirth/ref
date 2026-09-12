@@ -96,6 +96,8 @@ mod tests {
             key: CitationKey::new(key).unwrap(),
             path: PathBuf::new(),
             has_pdf: false,
+            pdf_filename: None,
+            pdf_path: None,
             added_at: None,
             metadata: Reference {
                 entry_type: ReferenceType::Article,

@@ -53,7 +53,7 @@ fn imports_common_fields_authors_macros_unicode_and_no_pdf() {
     assert_eq!(stored.metadata.doi.as_deref(), Some("10.1234/example"));
     assert_eq!(stored.metadata.tags, ["eeg", "attention", "neuroscience"]);
     assert!(!stored.has_pdf);
-    assert!(!temp.path().join(".ref/refs/smith2024/paper.pdf").exists());
+    assert!(!temp.path().join(".ref/source/smith2024.pdf").exists());
 }
 
 // Scenario: maps entry types and date.

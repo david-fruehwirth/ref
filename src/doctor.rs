@@ -150,7 +150,7 @@ pub fn inspect(repo: &Repository) -> Result<DoctorReport> {
             }
         };
         let metadata: Reference = match crate::repository::parse_reference_yaml(&text) {
-            Ok((metadata, _)) => metadata,
+            Ok((metadata, _, _)) => metadata,
             Err(error) => {
                 report.diagnostics.push(DoctorDiagnostic::InvalidMetadata {
                     key: key.to_string(),
