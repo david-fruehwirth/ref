@@ -15,7 +15,7 @@ use r#ref::{
     model::{
         display_author, generated_key, validate_year, CitationKey, Person, Reference, ReferenceType,
     },
-    repository::{Repository, StoredReference},
+    repository::{Repository, SourceProofStatus, StoredReference},
 };
 use std::{
     env, fs,
@@ -81,13 +81,10 @@ enum Commands {
     Add(AddArgs),
     /// List references in the repository
     #[command(
-        after_help = "Examples:\n  ref list\n  ref list --sort year\n  ref list --sort author"
+        long_about = "List references in the repository.\n\nWith no filter, all references are listed. --all makes that default explicit and cannot be combined with another filter. --used and --unused search for citation keys from the current directory downward using the same scope and exclusions as ref clean. Usage filters can be combined with one PDF filter.",
+        after_help = "Examples:\n  ref list\n  ref list --all\n  ref list --used\n  ref list --unused --no-pdf\n  ref list --pdf --json\n\n--used conflicts with --unused; --pdf conflicts with --no-pdf; --all conflicts with every other filter."
     )]
-    List {
-        /// Sort references by citation key, year, first author, or title
-        #[arg(long, value_enum, default_value = "key")]
-        sort: Sort,
-    },
+    List(ListArgs),
     /// Print recently added citation keys
     #[command(
         long_about = "Print citation keys for the references most recently added to this repository.",
@@ -212,6 +209,27 @@ struct CleanArgs {
     /// Remove unused references without confirmation
     #[arg(long, short = 'y')]
     yes: bool,
+}
+#[derive(Args)]
+struct ListArgs {
+    /// Sort references by citation key, year, first author, or title
+    #[arg(long, value_enum, default_value = "key")]
+    sort: Sort,
+    /// Explicitly list every reference (cannot be combined with filters)
+    #[arg(long, conflicts_with_all = ["used", "unused", "pdf", "no_pdf"])]
+    all: bool,
+    /// List references cited below the current directory
+    #[arg(long, conflicts_with = "unused")]
+    used: bool,
+    /// List references not cited below the current directory
+    #[arg(long, conflicts_with = "used")]
+    unused: bool,
+    /// List references with a valid stored PDF
+    #[arg(long, conflicts_with = "no_pdf")]
+    pdf: bool,
+    /// List references without a valid stored PDF
+    #[arg(long, conflicts_with = "pdf")]
+    no_pdf: bool,
 }
 #[derive(Args)]
 struct AddArgs {
@@ -408,7 +426,7 @@ fn command_name(c: &Commands) -> &'static str {
     match c {
         Commands::Init => "init",
         Commands::Add(_) => "add",
-        Commands::List { .. } => "list",
+        Commands::List(_) => "list",
         Commands::Last { .. } => "last",
         Commands::Search(_) => "search",
         Commands::Show { .. } => "show",
@@ -439,7 +457,7 @@ fn execute(command: Commands, format: OutputFormat) -> Result<Execution> {
             )
         }
         Commands::Add(a) => add(&repo()?, a, format)?,
-        Commands::List { sort } => list(&repo()?, sort)?,
+        Commands::List(args) => list(&repo()?, args)?,
         Commands::Last { number } => {
             let references = repo()?
                 .recent_references(number)?
@@ -704,9 +722,43 @@ fn alphabetical_suffix(mut n: usize) -> String {
     }
     s
 }
-fn list(repo: &Repository, sort: Sort) -> Result<Execution> {
-    let mut rs = repo.load_all()?;
-    rs.sort_by(|a, b| match sort {
+fn list(repo: &Repository, args: ListArgs) -> Result<Execution> {
+    let mut rs = if args.used || args.unused {
+        let cwd = env::current_dir()?;
+        let analysis = clean::analyze(repo, &cwd, &[])?;
+        if !analysis.scan_errors.is_empty() {
+            bail!(
+                "usage scan incomplete: {}",
+                analysis
+                    .scan_errors
+                    .iter()
+                    .map(|error| format!("{}: {}", error.path.display(), error.message))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+        }
+        if args.used {
+            analysis.used
+        } else {
+            analysis.unused
+        }
+    } else {
+        repo.load_all()?
+    };
+    if args.pdf || args.no_pdf {
+        rs.retain(|reference| {
+            let valid = matches!(
+                repo.source_proof_status(&reference.key),
+                SourceProofStatus::Present(_)
+            );
+            if args.pdf {
+                valid
+            } else {
+                !valid
+            }
+        });
+    }
+    rs.sort_by(|a, b| match args.sort {
         Sort::Key => a.key.cmp(&b.key),
         Sort::Year => a
             .metadata

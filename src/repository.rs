@@ -84,7 +84,10 @@ impl Repository {
             Ok(metadata) if metadata.len() == 0 => {
                 SourceProofStatus::Invalid("file is empty".into())
             }
-            Ok(_) => SourceProofStatus::Present(path),
+            Ok(_) => match fs::File::open(&path) {
+                Ok(_) => SourceProofStatus::Present(path),
+                Err(error) => SourceProofStatus::Invalid(format!("cannot read file: {error}")),
+            },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 SourceProofStatus::Missing
             }
