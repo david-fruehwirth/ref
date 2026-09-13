@@ -18,13 +18,11 @@ pub trait Editor {
 }
 
 pub fn open_reference(repo: &Repository, key: &CitationKey, opener: &dyn FileOpener) -> Result<()> {
-    let reference = repo.load_reference(key)?;
-    let Some(pdf) = reference.pdf_path else {
-        bail!("reference `{key}` has no PDF");
-    };
-    if !pdf.is_file() {
-        bail!("reference `{key}` has no PDF");
-    }
+    // Use the repository's shared resolution and source-proof policy rather
+    // than independently interpreting pdf_filename here.
+    let pdf = repo
+        .source_pdf_path(key)
+        .map_err(|_| anyhow!("reference `{key}` has no PDF"))?;
     opener
         .open(&pdf)
         .with_context(|| format!("failed to open {}", pdf.display()))

@@ -31,6 +31,7 @@ fn stored(key: &str) -> StoredReference {
         has_pdf: false,
         pdf_filename: None,
         pdf_path: None,
+        pdf_is_managed: false,
         added_at: None,
     }
 }

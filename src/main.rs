@@ -111,7 +111,7 @@ enum Commands {
     },
     /// Open a reference's source PDF in the system viewer
     #[command(
-        long_about = "Open the PDF resolved from pdf_directory and the reference's pdf_filename in the operating system's default application. The command fails when the exact citation key does not exist or has no source PDF."
+        long_about = "Open the PDF resolved from pdf_directories and the reference's pdf_filename in the operating system's default application. The command fails when the exact citation key does not exist or has no source PDF."
     )]
     Open {
         /// Exact citation key whose source PDF should be opened
@@ -119,7 +119,7 @@ enum Commands {
     },
     /// Attach a source PDF to an existing reference
     #[command(
-        long_about = "Attach a source PDF to an existing reference that has no attachment.\n\nThe PDF is copied to the configured PDF directory as <KEY>.pdf and ref.yaml stores that filename. The source remains untouched, and an existing source PDF is never overwritten.",
+        long_about = "Attach a source PDF to an existing reference that has no attachment.\n\nThe PDF is copied to the first configured PDF directory as <KEY>.pdf and ref.yaml stores that filename. The source remains untouched, and an existing source PDF is never overwritten.",
         after_help = "Example:\n  ref attach Smith2024Attention ~/Downloads/paper.pdf"
     )]
     Attach {

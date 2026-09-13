@@ -12,7 +12,7 @@ fn init_configures_lazy_default_pdf_directory() {
     let repo = Repository::init(temp.path()).unwrap();
     assert_eq!(
         fs::read_to_string(repo.root().join("config.yaml")).unwrap(),
-        "version: 1\npdf_directory: source\n"
+        "version: 1\npdf_directories:\n  - source\n"
     );
     assert!(!repo.root().join("source").exists());
 }
@@ -27,6 +27,106 @@ fn absent_pdf_directory_uses_source() {
     assert_eq!(repo.pdf_directory().unwrap(), repo.root().join("source"));
 }
 
+fn set_pdf_filename(repo: &Repository, key: &CitationKey, filename: &str) {
+    let yaml = repo.reference_path(key).join("ref.yaml");
+    let mut text = fs::read_to_string(&yaml).unwrap();
+    text.push_str(&format!("pdf_filename: {filename}\n"));
+    fs::write(yaml, text).unwrap();
+}
+
+// Scenario: lookup respects configured order, supports relative and absolute
+// directories, and then falls back to a path relative to .ref.
+// Requirements: REQ-080, REQ-082, REQ-085
+#[test]
+fn ordered_lookup_and_relative_fallback() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = Repository::init(temp.path()).unwrap();
+    let archive = temp.path().join("archive");
+    fs::create_dir_all(&archive).unwrap();
+    fs::write(
+        repo.root().join("config.yaml"),
+        format!(
+            "version: 1\npdf_directories:\n  - primary\n  - {}\n",
+            archive.display()
+        ),
+    )
+    .unwrap();
+    let key = CitationKey::new("Einstein").unwrap();
+    support::add(
+        &repo,
+        key.as_str(),
+        &support::sample("Theory", "Einstein", Some(1920)),
+    );
+    set_pdf_filename(&repo, &key, "legacy/Einstein.pdf");
+
+    fs::create_dir_all(archive.join("legacy")).unwrap();
+    fs::write(archive.join("legacy/Einstein.pdf"), b"archive").unwrap();
+    fs::create_dir_all(repo.root().join("primary/legacy")).unwrap();
+    fs::write(repo.root().join("primary/legacy/Einstein.pdf"), b"primary").unwrap();
+    assert_eq!(
+        repo.source_pdf_path(&key).unwrap(),
+        repo.root().join("primary/legacy/Einstein.pdf")
+    );
+
+    fs::remove_file(repo.root().join("primary/legacy/Einstein.pdf")).unwrap();
+    assert_eq!(
+        repo.source_pdf_path(&key).unwrap(),
+        archive.join("legacy/Einstein.pdf")
+    );
+    fs::remove_file(archive.join("legacy/Einstein.pdf")).unwrap();
+    fs::create_dir_all(repo.root().join("legacy")).unwrap();
+    fs::write(repo.root().join("legacy/Einstein.pdf"), b"fallback").unwrap();
+    assert_eq!(
+        repo.source_pdf_path(&key).unwrap(),
+        repo.root().join("legacy/Einstein.pdf")
+    );
+}
+
+// Scenario: an absolute metadata path bypasses configured directories and is
+// external, just like a direct relative fallback, so mutation leaves it alone.
+// Requirements: REQ-082, REQ-086, REQ-087
+#[test]
+fn direct_paths_resolve_but_are_never_mutated() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = Repository::init(temp.path()).unwrap();
+    let external = temp.path().join("external.pdf");
+    fs::write(&external, b"external").unwrap();
+    let old = CitationKey::new("External").unwrap();
+    support::add(
+        &repo,
+        old.as_str(),
+        &support::sample("External", "Doe", Some(2024)),
+    );
+    set_pdf_filename(&repo, &old, external.to_str().unwrap());
+    // Even a same-named file in configured storage must be skipped for an
+    // absolute pdf_filename.
+    fs::create_dir(repo.root().join("source")).unwrap();
+    fs::write(repo.root().join("source/external.pdf"), b"configured").unwrap();
+    assert_eq!(repo.source_pdf_path(&old).unwrap(), external);
+
+    let new = CitationKey::new("Renamed").unwrap();
+    repo.rename(&old, &new).unwrap();
+    assert_eq!(fs::read(&external).unwrap(), b"external");
+    repo.remove(&new).unwrap();
+    assert_eq!(fs::read(&external).unwrap(), b"external");
+
+    let relative = repo.root().join("legacy/relative.pdf");
+    fs::create_dir_all(relative.parent().unwrap()).unwrap();
+    fs::write(&relative, b"relative").unwrap();
+    let old = CitationKey::new("RelativeExternal").unwrap();
+    support::add(
+        &repo,
+        old.as_str(),
+        &support::sample("Relative", "Doe", Some(2024)),
+    );
+    set_pdf_filename(&repo, &old, "legacy/relative.pdf");
+    assert_eq!(repo.source_pdf_path(&old).unwrap(), relative);
+    let new = CitationKey::new("RelativeRenamed").unwrap();
+    repo.rename(&old, &new).unwrap();
+    repo.remove(&new).unwrap();
+    assert_eq!(fs::read(relative).unwrap(), b"relative");
+}
+
 // Scenario: relative and absolute PDF directories resolve from the documented bases.
 // Requirements: REQ-080, REQ-082
 #[test]
@@ -35,7 +135,7 @@ fn relative_and_absolute_directories_are_resolved() {
     let repo = Repository::init(temp.path()).unwrap();
     fs::write(
         repo.root().join("config.yaml"),
-        "version: 1\npdf_directory: assets/pdfs\n",
+        "version: 1\npdf_directories:\n  - assets/pdfs\n",
     )
     .unwrap();
     assert_eq!(
@@ -45,7 +145,7 @@ fn relative_and_absolute_directories_are_resolved() {
     let external = temp.path().join("external");
     fs::write(
         repo.root().join("config.yaml"),
-        format!("version: 1\npdf_directory: {}\n", external.display()),
+        format!("version: 1\npdf_directories:\n  - {}\n", external.display()),
     )
     .unwrap();
     assert_eq!(repo.pdf_directory().unwrap(), external);

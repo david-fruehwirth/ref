@@ -9,12 +9,12 @@ use std::{
 #[derive(Deserialize, Serialize)]
 struct Config {
     version: u8,
-    #[serde(default = "default_pdf_directory")]
-    pdf_directory: PathBuf,
+    #[serde(default = "default_pdf_directories")]
+    pdf_directories: Vec<PathBuf>,
 }
 
-fn default_pdf_directory() -> PathBuf {
-    PathBuf::from("source")
+fn default_pdf_directories() -> Vec<PathBuf> {
+    vec![PathBuf::from("source")]
 }
 
 #[derive(Clone, Debug)]
@@ -25,6 +25,9 @@ pub struct StoredReference {
     pub has_pdf: bool,
     pub pdf_filename: Option<String>,
     pub pdf_path: Option<PathBuf>,
+    /// Whether `pdf_path` was resolved through a configured PDF directory and
+    /// can therefore be safely managed by mutating commands.
+    pub pdf_is_managed: bool,
     /// Operational creation metadata; absent for repositories created by older versions.
     pub added_at: Option<String>,
 }
@@ -39,6 +42,12 @@ pub enum SourceProofStatus {
     Present(PathBuf),
     Missing,
     Invalid(String),
+}
+
+enum PdfResolution {
+    Present { path: PathBuf, managed: bool },
+    Missing,
+    Invalid(PathBuf),
 }
 
 #[derive(Clone, Debug)]
@@ -60,7 +69,7 @@ impl Repository {
         fs::create_dir(tmp.path().join("refs"))?;
         fs::write(
             tmp.path().join("config.yaml"),
-            "version: 1\npdf_directory: source\n",
+            "version: 1\npdf_directories:\n  - source\n",
         )?;
         let temp_path = tmp.keep();
         fs::rename(&temp_path, &root)
@@ -99,27 +108,68 @@ impl Repository {
         .with_context(|| format!("invalid {}", path.display()))
     }
 
-    pub fn pdf_directory(&self) -> Result<PathBuf> {
-        let configured = self.config()?.pdf_directory;
-        let path = if configured.is_absolute() {
-            configured
-        } else {
-            self.root.join(configured)
-        };
-        if path.exists() && !path.is_dir() {
-            bail!("configured PDF directory `{}` exists but is not a directory\nhint: update `pdf_directory` in {}", path.display(), self.root.join("config.yaml").display());
+    pub fn pdf_directories(&self) -> Result<Vec<PathBuf>> {
+        let configured = self.config()?.pdf_directories;
+        if configured.is_empty() {
+            bail!("`pdf_directories` must contain at least one directory");
         }
-        Ok(path)
+        configured
+            .into_iter()
+            .map(|configured| {
+                let path = if configured.is_absolute() {
+                    configured
+                } else {
+                    self.root.join(configured)
+                };
+                if path.exists() && !path.is_dir() {
+                    bail!("configured PDF directory `{}` exists but is not a directory\nhint: update `pdf_directories` in {}", path.display(), self.root.join("config.yaml").display());
+                }
+                Ok(path)
+            })
+            .collect()
     }
 
-    pub fn pdf_path(&self, key: &CitationKey, filename: &str) -> Result<PathBuf> {
-        let expected = format!("{key}.pdf");
-        if filename != expected || Path::new(filename).file_name() != Some(filename.as_ref()) {
-            bail!(
-                "invalid pdf_filename `{filename}` for reference `{key}` (expected `{expected}`)"
-            );
+    /// The first configured directory is the only destination for new PDFs.
+    pub fn pdf_directory(&self) -> Result<PathBuf> {
+        Ok(self.pdf_directories()?.remove(0))
+    }
+
+    fn resolve_pdf(&self, filename: &str) -> Result<PdfResolution> {
+        let filename = Path::new(filename);
+        let mut first_invalid = None;
+        if filename.is_relative() {
+            for directory in self.pdf_directories()? {
+                let path = directory.join(filename);
+                match inspect_pdf(path.clone()) {
+                    SourceProofStatus::Present(path) => {
+                        return Ok(PdfResolution::Present {
+                            path,
+                            managed: true,
+                        });
+                    }
+                    SourceProofStatus::Invalid(_) if first_invalid.is_none() => {
+                        first_invalid = Some(path)
+                    }
+                    _ => {}
+                }
+            }
         }
-        Ok(self.pdf_directory()?.join(filename))
+        let direct = if filename.is_absolute() {
+            filename.to_path_buf()
+        } else {
+            self.root.join(filename)
+        };
+        match inspect_pdf(direct.clone()) {
+            SourceProofStatus::Present(path) => Ok(PdfResolution::Present {
+                path,
+                managed: false,
+            }),
+            SourceProofStatus::Invalid(_) => Ok(PdfResolution::Invalid(direct)),
+            SourceProofStatus::Missing => match first_invalid {
+                Some(path) => Ok(PdfResolution::Invalid(path)),
+                None => Ok(PdfResolution::Missing),
+            },
+        }
     }
 
     /// Inspect the canonical source artifact. `metadata` follows symlinks, which
@@ -129,10 +179,10 @@ impl Repository {
             Ok(reference) => reference,
             Err(error) => return SourceProofStatus::Invalid(error.to_string()),
         };
-        let Some(path) = loaded.pdf_path else {
-            return SourceProofStatus::Missing;
-        };
-        inspect_pdf(path)
+        match loaded.pdf_path {
+            Some(path) => inspect_pdf(path),
+            None => SourceProofStatus::Missing,
+        }
     }
 
     pub fn source_pdf_path(&self, key: &CitationKey) -> Result<PathBuf> {
@@ -206,7 +256,7 @@ impl Repository {
         if !self.references_dir().is_dir() {
             bail!("missing {}", self.references_dir().display());
         }
-        self.pdf_directory()?;
+        self.pdf_directories()?;
         Ok(())
     }
 
@@ -226,10 +276,14 @@ impl Repository {
         if pdf_filename.is_none() && path.join("paper.pdf").exists() {
             bail!("legacy per-reference PDF found for `{key}`; run `ref migrate-pdfs --dry-run`, then `ref migrate-pdfs`");
         }
-        let pdf_path = pdf_filename
-            .as_deref()
-            .map(|name| self.pdf_path(key, name))
-            .transpose()?;
+        let (pdf_path, pdf_is_managed) = match pdf_filename.as_deref() {
+            Some(name) => match self.resolve_pdf(name)? {
+                PdfResolution::Present { path, managed } => (Some(path), managed),
+                PdfResolution::Invalid(path) => (Some(path), false),
+                PdfResolution::Missing => (None, false),
+            },
+            None => (None, false),
+        };
         let has_pdf = pdf_path
             .as_ref()
             .is_some_and(|path| matches!(inspect_pdf(path.clone()), SourceProofStatus::Present(_)));
@@ -239,6 +293,7 @@ impl Repository {
             has_pdf,
             pdf_filename,
             pdf_path,
+            pdf_is_managed,
             path,
             added_at,
         })
@@ -338,11 +393,13 @@ impl Repository {
             bail!("reference `{new}` already exists");
         }
         let mut reference = self.load_reference(old)?;
-        let old_pdf = reference.pdf_path.clone();
+        let old_pdf = reference
+            .pdf_is_managed
+            .then_some(reference.pdf_path.clone())
+            .flatten();
         let new_pdf = old_pdf
             .as_ref()
-            .map(|_| self.pdf_directory().map(|d| d.join(format!("{new}.pdf"))))
-            .transpose()?;
+            .map(|path| path.with_file_name(format!("{new}.pdf")));
         if new_pdf.as_ref().is_some_and(|p| p.exists()) {
             bail!(
                 "PDF destination `{}` already exists; refusing to overwrite it",
@@ -372,7 +429,11 @@ impl Repository {
             bail!("reference `{key}` does not exist");
         }
         let reference = self.load_reference(key)?;
-        if let Some(pdf) = reference.pdf_path {
+        if let Some(pdf) = reference
+            .pdf_is_managed
+            .then_some(reference.pdf_path)
+            .flatten()
+        {
             if pdf.exists() {
                 fs::remove_file(&pdf)
                     .with_context(|| format!("failed to remove source PDF {}", pdf.display()))?;
@@ -441,6 +502,7 @@ impl Repository {
                 has_pdf: true,
                 pdf_filename: Some(format!("{}.pdf", change.key)),
                 pdf_path: Some(change.to.clone()),
+                pdf_is_managed: true,
                 added_at,
             };
             if let Err(error) = self.write_stored_metadata(&stored) {
