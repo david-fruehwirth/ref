@@ -1,6 +1,6 @@
 use assert_cmd::Command;
 use r#ref::{
-    model::{CitationKey, Person, Reference, ReferenceType},
+    model::{Author, CitationKey, Person, Reference, ReferenceType},
     repository::Repository,
 };
 use std::path::Path;
@@ -23,11 +23,12 @@ pub fn sample(title: &str, family: &str, year: Option<u16>) -> Reference {
     Reference {
         entry_type: ReferenceType::Article,
         title: title.into(),
-        authors: vec![Person {
+        authors: vec![Author::Person(Person {
             given: "Jane".into(),
             family: family.into(),
-        }],
+        })],
         year,
+        date: None,
         container_title: Some("Journal of Examples".into()),
         publisher: None,
         volume: None,
@@ -35,6 +36,7 @@ pub fn sample(title: &str, family: &str, year: Option<u16>) -> Reference {
         pages: None,
         doi: None,
         url: None,
+        urldate: None,
         tags: vec![],
         notes: None,
     }

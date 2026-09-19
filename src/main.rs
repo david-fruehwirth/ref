@@ -13,7 +13,8 @@ use r#ref::{
     launch::{self, Editor, Environment, FileOpener},
     metadata::{Doi, DoiMetadataClient},
     model::{
-        display_author, generated_key, validate_year, CitationKey, Person, Reference, ReferenceType,
+        display_author, generated_key, validate_year, Author, CitationKey, Person, Reference,
+        ReferenceType,
     },
     repository::{Repository, SourceProofStatus, StoredReference},
 };
@@ -673,8 +674,9 @@ fn add(repo: &Repository, mut a: AddArgs, format: OutputFormat) -> Result<Execut
     let metadata = Reference {
         entry_type: a.entry_type,
         title: a.title.unwrap_or_default(),
-        authors: a.author,
+        authors: a.author.into_iter().map(Author::Person).collect(),
         year: a.year,
+        date: None,
         container_title: a.container_title,
         publisher: a.publisher,
         volume: None,
@@ -684,6 +686,7 @@ fn add(repo: &Repository, mut a: AddArgs, format: OutputFormat) -> Result<Execut
             .doi
             .map(|v| v.parse::<Doi>().map_or(v.clone(), |d| d.to_string())),
         url: a.url,
+        urldate: None,
         tags: a.tags,
         notes: None,
     };
@@ -860,7 +863,7 @@ fn rank(r: &StoredReference, q: &str, a: &SearchArgs) -> Option<u8> {
         .metadata
         .authors
         .iter()
-        .map(|x| format!("{} {}", x.given, x.family))
+        .map(|x| format!("{} {}", x.given_name(), x.display_name()))
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase();
@@ -962,7 +965,7 @@ fn remove(repo: &Repository, key: String, yes: bool, format: OutputFormat) -> Re
             r.metadata
                 .authors
                 .iter()
-                .map(|a| format!("{} {}", a.given, a.family))
+                .map(|a| format!("{} {}", a.given_name(), a.display_name()))
                 .collect::<Vec<_>>()
                 .join(", "),
             r.metadata.title,

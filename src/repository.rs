@@ -776,6 +776,7 @@ mod tests {
             title: "Example".into(),
             authors: vec![],
             year: None,
+            date: None,
             container_title: None,
             publisher: None,
             volume: None,
@@ -783,6 +784,7 @@ mod tests {
             pages: None,
             doi: None,
             url: None,
+            urldate: None,
             tags: vec![],
             notes: None,
         };

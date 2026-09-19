@@ -53,7 +53,7 @@ fn public_formatting_covers_author_shapes() {
             family: "Parmar".into(),
         },
     ];
-    assert_eq!(display_author(&[]), "-");
+    assert_eq!(display_author::<Person>(&[]), "-");
     assert_eq!(display_author(&people[..1]), "Vaswani");
     assert_eq!(display_author(&people[..2]), "Vaswani & Shazeer");
     assert_eq!(display_author(&people), "Vaswani et al.");
