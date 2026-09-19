@@ -19,8 +19,8 @@ const K: [u32; 64] = [
 
 fn compress(state: &mut [u32; 8], block: &[u8; 64]) {
     let mut w = [0_u32; 64];
-    for (i, chunk) in block.chunks_exact(4).enumerate() {
-        w[i] = u32::from_be_bytes(chunk.try_into().unwrap());
+    for (i, chunk) in block.as_chunks::<4>().0.iter().enumerate() {
+        w[i] = u32::from_be_bytes(*chunk);
     }
     for i in 16..64 {
         let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
@@ -69,8 +69,8 @@ pub fn sha256_reader(reader: &mut impl Read) -> Result<String> {
         total = total.wrapping_add(n as u64);
         pending.extend_from_slice(&input[..n]);
         let full = pending.len() / 64 * 64;
-        for chunk in pending[..full].chunks_exact(64) {
-            compress(&mut state, chunk.try_into().unwrap());
+        for chunk in pending[..full].as_chunks::<64>().0 {
+            compress(&mut state, chunk);
         }
         pending.drain(..full);
     }
@@ -79,8 +79,8 @@ pub fn sha256_reader(reader: &mut impl Read) -> Result<String> {
         pending.push(0);
     }
     pending.extend_from_slice(&total.wrapping_mul(8).to_be_bytes());
-    for chunk in pending.chunks_exact(64) {
-        compress(&mut state, chunk.try_into().unwrap());
+    for chunk in pending.as_chunks::<64>().0 {
+        compress(&mut state, chunk);
     }
     Ok(state.iter().map(|word| format!("{word:08x}")).collect())
 }
