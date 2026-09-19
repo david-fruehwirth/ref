@@ -65,6 +65,41 @@ PDF lookup shall check each configured directory in list order for a relative
 first readable, non-empty regular file wins. `open`, `doctor`, `show`, `list
 --pdf`, and `list --no-pdf` shall all use this shared resolution.
 
+### REQ-091: PDF hashing configuration
+
+`pdf_hashing` shall be a YAML boolean, default to enabled when absent, and be
+written as `true` by initialization. When false, PDF-managing commands shall not
+compute hashes, doctor shall produce no hash findings, and existing hashes shall
+be retained unchanged. Invalid non-boolean values shall fail configuration loading.
+
+### REQ-092: PDF hash metadata
+
+`pdf_sha256` shall be optional metadata containing exactly 64 lowercase
+hexadecimal SHA-256 characters. It is invalid without `pdf_filename`. References
+without PDFs shall omit it, while older PDF references without it remain readable.
+Hashing shall stream through the resolved file without modifying it.
+
+### REQ-093: Hash generation and refresh
+
+When hashing is enabled, add, attach, and applied legacy PDF migration shall store
+the PDF hash; supported replacement shall refresh it. `ref hash` shall use normal
+PDF resolution to refresh every available PDF, clearly report unavailable PDFs,
+and modify metadata only. `--dry-run` shall report metadata that would change
+without writing it. The command shall fail when hashing is disabled.
+
+### REQ-094: Hash integrity diagnostics
+
+With hashing enabled, doctor shall accept a matching hash, report an actionable
+error for a mismatch, and report an actionable warning for an available PDF with
+no hash. It shall not write metadata. Existing missing/invalid PDF diagnostics
+take precedence when the resolved artifact is unavailable.
+
+### REQ-095: Hash command output
+
+`ref hash` and its dry run shall use the central human/JSON output architecture.
+JSON shall identify dry-run state and updated and skipped citation keys in the
+versioned success envelope; disabled hashing shall use the failure envelope.
+
 ## Reference metadata
 
 ### REQ-008: Human-readable metadata
@@ -111,9 +146,10 @@ Adding a PDF shall copy it to the first configured PDF directory as
 
 ### REQ-083: PDF metadata
 
-Newly added or attached PDFs shall store only `pdf_filename:
-<citation-key>.pdf`; a reference without a PDF shall omit that field. Existing
-metadata may contain a plain filename, relative path, or absolute path.
+Newly added or attached PDFs shall store `pdf_filename: <citation-key>.pdf` and,
+subject to REQ-091, `pdf_sha256`. A reference without a PDF shall omit both fields.
+Existing `pdf_filename` metadata may contain a plain filename, relative path, or
+absolute path.
 
 ### REQ-084: Configured PDF persistence
 

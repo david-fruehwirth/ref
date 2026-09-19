@@ -11,6 +11,12 @@ struct Config {
     version: u8,
     #[serde(default = "default_pdf_directories")]
     pdf_directories: Vec<PathBuf>,
+    #[serde(default = "default_pdf_hashing")]
+    pdf_hashing: bool,
+}
+
+fn default_pdf_hashing() -> bool {
+    true
 }
 
 fn default_pdf_directories() -> Vec<PathBuf> {
@@ -24,6 +30,7 @@ pub struct StoredReference {
     pub path: PathBuf,
     pub has_pdf: bool,
     pub pdf_filename: Option<String>,
+    pub pdf_sha256: Option<String>,
     pub pdf_path: Option<PathBuf>,
     /// Whether `pdf_path` was resolved through a configured PDF directory and
     /// can therefore be safely managed by mutating commands.
@@ -69,7 +76,7 @@ impl Repository {
         fs::create_dir(tmp.path().join("refs"))?;
         fs::write(
             tmp.path().join("config.yaml"),
-            "version: 1\npdf_directories:\n  - source\n",
+            "version: 1\npdf_directories:\n  - source\npdf_hashing: true\n",
         )?;
         let temp_path = tmp.keep();
         fs::rename(&temp_path, &root)
@@ -127,6 +134,10 @@ impl Repository {
                 Ok(path)
             })
             .collect()
+    }
+
+    pub fn pdf_hashing(&self) -> Result<bool> {
+        Ok(self.config()?.pdf_hashing)
     }
 
     /// The first configured directory is the only destination for new PDFs.
@@ -241,6 +252,15 @@ impl Repository {
             .map_err(|error| error.error)
             .with_context(|| format!("failed to attach source PDF to `{key}`"))?;
         reference.pdf_filename = Some(filename);
+        if self.pdf_hashing()? {
+            match sha256_file(&destination) {
+                Ok(hash) => reference.pdf_sha256 = Some(hash),
+                Err(error) => {
+                    let _ = fs::remove_file(&destination);
+                    return Err(error);
+                }
+            }
+        }
         if let Err(error) = self.write_stored_metadata(&reference) {
             let _ = fs::remove_file(&destination);
             return Err(error);
@@ -268,7 +288,7 @@ impl Repository {
         let yaml = path.join("ref.yaml");
         let contents = fs::read_to_string(&yaml)
             .with_context(|| format!("failed to read {}", yaml.display()))?;
-        let (metadata, added_at, pdf_filename) = parse_reference_yaml(&contents)
+        let (metadata, added_at, pdf_filename, pdf_sha256) = parse_reference_yaml(&contents)
             .with_context(|| format!("failed to parse {}", yaml.display()))?;
         metadata
             .validate()
@@ -292,6 +312,7 @@ impl Repository {
             metadata,
             has_pdf,
             pdf_filename,
+            pdf_sha256,
             pdf_path,
             pdf_is_managed,
             path,
@@ -353,7 +374,6 @@ impl Repository {
                 serde_yaml::Value::String(filename.clone()),
             );
         }
-        fs::write(tmp.path().join("ref.yaml"), serde_yaml::to_string(&value)?)?;
         let mut committed_pdf = None;
         if let Some(pdf) = pdf {
             let directory = self.pdf_directory()?;
@@ -370,8 +390,23 @@ impl Repository {
             staged
                 .persist_noclobber(&destination)
                 .map_err(|e| e.error)?;
+            if self.pdf_hashing()? {
+                match sha256_file(&destination) {
+                    Ok(hash) => {
+                        value
+                            .as_mapping_mut()
+                            .unwrap()
+                            .insert("pdf_sha256".into(), hash.into());
+                    }
+                    Err(error) => {
+                        let _ = fs::remove_file(&destination);
+                        return Err(error);
+                    }
+                }
+            }
             committed_pdf = Some(destination);
         }
+        fs::write(tmp.path().join("ref.yaml"), serde_yaml::to_string(&value)?)?;
         let temp_path = tmp.keep();
         if let Err(error) = fs::rename(&temp_path, self.reference_path(key)) {
             // `TempDir::keep` transfers cleanup responsibility to us. Never leave
@@ -474,7 +509,7 @@ impl Repository {
                 );
             }
             let text = fs::read_to_string(entry.path().join("ref.yaml"))?;
-            let (_, _, filename) = parse_reference_yaml(&text)?;
+            let (_, _, filename, _) = parse_reference_yaml(&text)?;
             if filename.is_some() {
                 bail!("reference `{key}` has both legacy PDF storage and pdf_filename; resolve this conflict manually");
             }
@@ -494,13 +529,18 @@ impl Repository {
             })?;
             let yaml = self.reference_path(&change.key).join("ref.yaml");
             let text = fs::read_to_string(&yaml)?;
-            let (metadata, added_at, _) = parse_reference_yaml(&text)?;
+            let (metadata, added_at, _, existing_hash) = parse_reference_yaml(&text)?;
             let stored = StoredReference {
                 key: change.key.clone(),
                 metadata,
                 path: self.reference_path(&change.key),
                 has_pdf: true,
                 pdf_filename: Some(format!("{}.pdf", change.key)),
+                pdf_sha256: if self.pdf_hashing()? {
+                    Some(sha256_file(&change.to)?)
+                } else {
+                    existing_hash
+                },
                 pdf_path: Some(change.to.clone()),
                 pdf_is_managed: true,
                 added_at,
@@ -527,6 +567,9 @@ impl Repository {
         if let Some(filename) = &reference.pdf_filename {
             map.insert("pdf_filename".into(), filename.clone().into());
         }
+        if let Some(hash) = &reference.pdf_sha256 {
+            map.insert("pdf_sha256".into(), hash.clone().into());
+        }
         let path = self.reference_path(&reference.key).join("ref.yaml");
         let mut temporary = tempfile::NamedTempFile::new_in(self.reference_path(&reference.key))?;
         use std::io::Write;
@@ -534,6 +577,42 @@ impl Repository {
         temporary.persist(&path).map_err(|e| e.error)?;
         Ok(())
     }
+
+    /// Refresh hashes for every reference with an available PDF. Returns updated
+    /// keys and keys skipped because no usable PDF was available.
+    pub fn refresh_pdf_hashes(
+        &self,
+        dry_run: bool,
+    ) -> Result<(Vec<CitationKey>, Vec<CitationKey>)> {
+        if !self.pdf_hashing()? {
+            bail!(
+                "PDF hashing is disabled in config.yaml; set `pdf_hashing: true` to refresh hashes"
+            );
+        }
+        let mut updated = Vec::new();
+        let mut skipped = Vec::new();
+        for mut reference in self.load_all()? {
+            let Some(path) = reference.pdf_path.as_ref().filter(|_| reference.has_pdf) else {
+                skipped.push(reference.key);
+                continue;
+            };
+            let digest = sha256_file(path)?;
+            if reference.pdf_sha256.as_deref() != Some(&digest) {
+                updated.push(reference.key.clone());
+                if !dry_run {
+                    reference.pdf_sha256 = Some(digest);
+                    self.write_stored_metadata(&reference)?;
+                }
+            }
+        }
+        Ok((updated, skipped))
+    }
+}
+
+pub fn sha256_file(path: &Path) -> Result<String> {
+    let mut file =
+        fs::File::open(path).with_context(|| format!("failed to read PDF {}", path.display()))?;
+    crate::hash::sha256_reader(&mut file)
 }
 
 fn inspect_pdf(path: PathBuf) -> SourceProofStatus {
@@ -551,9 +630,9 @@ fn inspect_pdf(path: PathBuf) -> SourceProofStatus {
     }
 }
 
-pub(crate) fn parse_reference_yaml(
-    contents: &str,
-) -> Result<(Reference, Option<String>, Option<String>)> {
+type ParsedReferenceYaml = (Reference, Option<String>, Option<String>, Option<String>);
+
+pub(crate) fn parse_reference_yaml(contents: &str) -> Result<ParsedReferenceYaml> {
     let mut value: serde_yaml::Value = serde_yaml::from_str(contents)?;
     let added_at = value
         .as_mapping_mut()
@@ -568,7 +647,29 @@ pub(crate) fn parse_reference_yaml(
         .and_then(|mapping| mapping.remove(serde_yaml::Value::String("pdf_filename".into())))
         .map(serde_yaml::from_value::<String>)
         .transpose()?;
-    Ok((serde_yaml::from_value(value)?, added_at, pdf_filename))
+    let pdf_sha256 = value
+        .as_mapping_mut()
+        .and_then(|mapping| mapping.remove(serde_yaml::Value::String("pdf_sha256".into())))
+        .map(serde_yaml::from_value::<String>)
+        .transpose()?;
+    if let Some(hash) = &pdf_sha256 {
+        if hash.len() != 64
+            || !hash
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            bail!("pdf_sha256 must be exactly 64 lowercase hexadecimal characters");
+        }
+        if pdf_filename.is_none() {
+            bail!("pdf_sha256 is present without pdf_filename");
+        }
+    }
+    Ok((
+        serde_yaml::from_value(value)?,
+        added_at,
+        pdf_filename,
+        pdf_sha256,
+    ))
 }
 
 fn validate_utc_timestamp(value: &str) -> Result<()> {

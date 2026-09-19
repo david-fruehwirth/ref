@@ -7,7 +7,7 @@
 use crate::{
     metadata::Doi,
     model::{CitationKey, Reference},
-    repository::{Repository, SourceProofStatus},
+    repository::{sha256_file, Repository, SourceProofStatus},
 };
 use anyhow::Result;
 use std::{collections::HashMap, fs};
@@ -29,6 +29,8 @@ pub enum DoctorDiagnostic {
     DuplicateDoi { keys: Vec<CitationKey> },
     MissingSourcePdf { key: CitationKey },
     InvalidSourcePdf { key: CitationKey, reason: String },
+    MissingPdfHash { key: CitationKey },
+    PdfHashMismatch { key: CitationKey },
 }
 
 impl DoctorDiagnostic {
@@ -37,7 +39,8 @@ impl DoctorDiagnostic {
             Self::MissingYear { .. }
             | Self::MissingAuthors { .. }
             | Self::DuplicateDoi { .. }
-            | Self::MissingSourcePdf { .. } => DiagnosticSeverity::Warning,
+            | Self::MissingSourcePdf { .. }
+            | Self::MissingPdfHash { .. } => DiagnosticSeverity::Warning,
             _ => DiagnosticSeverity::Error,
         }
     }
@@ -63,6 +66,12 @@ impl DoctorDiagnostic {
             Self::InvalidSourcePdf { key, reason } => {
                 format!("{key}: invalid source PDF: {reason}")
             }
+            Self::MissingPdfHash { key } => format!(
+                "{key}: source PDF has no integrity hash; run `ref hash` to create it"
+            ),
+            Self::PdfHashMismatch { key } => format!(
+                "{key}: source PDF integrity mismatch; verify the PDF, then run `ref hash` to refresh its hash"
+            ),
         }
     }
 }
@@ -94,6 +103,7 @@ impl DoctorReport {
 
 pub fn inspect(repo: &Repository) -> Result<DoctorReport> {
     repo.validate_structure()?;
+    let hashing = repo.pdf_hashing()?;
     let mut report = DoctorReport::default();
     let mut dois: HashMap<String, Vec<CitationKey>> = HashMap::new();
     // Filesystem iteration order is unspecified. Sort before validation so both
@@ -149,16 +159,36 @@ pub fn inspect(repo: &Repository) -> Result<DoctorReport> {
                 continue;
             }
         };
-        let metadata: Reference = match crate::repository::parse_reference_yaml(&text) {
-            Ok((metadata, _, _)) => metadata,
-            Err(error) => {
-                report.diagnostics.push(DoctorDiagnostic::InvalidMetadata {
-                    key: key.to_string(),
-                    reason: error.to_string(),
-                });
-                continue;
+        let (metadata, _, _, stored_hash): (Reference, _, _, _) =
+            match crate::repository::parse_reference_yaml(&text) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    report.diagnostics.push(DoctorDiagnostic::InvalidMetadata {
+                        key: key.to_string(),
+                        reason: error.to_string(),
+                    });
+                    continue;
+                }
+            };
+        if hashing {
+            if let SourceProofStatus::Present(path) = repo.source_proof_status(&key) {
+                match stored_hash {
+                    Some(expected) => match sha256_file(&path) {
+                        Ok(actual) if actual != expected => report
+                            .diagnostics
+                            .push(DoctorDiagnostic::PdfHashMismatch { key: key.clone() }),
+                        Ok(_) => {}
+                        Err(error) => report.diagnostics.push(DoctorDiagnostic::InvalidSourcePdf {
+                            key: key.clone(),
+                            reason: error.to_string(),
+                        }),
+                    },
+                    None => report
+                        .diagnostics
+                        .push(DoctorDiagnostic::MissingPdfHash { key: key.clone() }),
+                }
             }
-        };
+        }
         report.metadata_parsed += 1;
         if let Err(error) = metadata.validate() {
             report.diagnostics.push(DoctorDiagnostic::InvalidMetadata {

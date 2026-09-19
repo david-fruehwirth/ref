@@ -5,14 +5,14 @@ use r#ref::{model::CitationKey, repository::Repository};
 use std::fs;
 
 // Scenario: init records the default without eagerly creating PDF storage.
-// Requirements: REQ-080, REQ-081
+// Requirements: REQ-080, REQ-081, REQ-091
 #[test]
 fn init_configures_lazy_default_pdf_directory() {
     let temp = tempfile::tempdir().unwrap();
     let repo = Repository::init(temp.path()).unwrap();
     assert_eq!(
         fs::read_to_string(repo.root().join("config.yaml")).unwrap(),
-        "version: 1\npdf_directories:\n  - source\n"
+        "version: 1\npdf_directories:\n  - source\npdf_hashing: true\n"
     );
     assert!(!repo.root().join("source").exists());
 }
