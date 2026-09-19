@@ -289,7 +289,8 @@ fn validate_date(value: &str, full_only: bool) -> Result<()> {
         }
         if parts.len() > 2 {
             let day: u8 = parts[2].parse()?;
-            let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+            let leap =
+                year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
             let max = match month {
                 2 if leap => 29,
                 2 => 28,
