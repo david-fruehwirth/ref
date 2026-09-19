@@ -602,3 +602,79 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod schema_consistency_tests {
+    use super::*;
+    // Scenario: JSON Schema and the canonical ReferenceType resolver contain exactly the same types. Requirement: REQ-118.
+    #[test]
+    fn schema_reference_types_and_required_fields_match_model() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../schema/ref.schema.json")).unwrap();
+        let documented: Vec<&str> = schema["properties"]["type"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        let canonical: Vec<&str> = [
+            "article",
+            "book",
+            "mvbook",
+            "inbook",
+            "bookinbook",
+            "suppbook",
+            "booklet",
+            "collection",
+            "mvcollection",
+            "incollection",
+            "suppcollection",
+            "dataset",
+            "manual",
+            "misc",
+            "online",
+            "patent",
+            "periodical",
+            "suppperiodical",
+            "proceedings",
+            "mvproceedings",
+            "inproceedings",
+            "reference",
+            "mvreference",
+            "inreference",
+            "report",
+            "set",
+            "software",
+            "thesis",
+            "unpublished",
+            "xdata",
+        ]
+        .into_iter()
+        .filter(|v| matches!(resolve_entry_type(v), ResolvedReferenceType::Canonical(_)))
+        .collect();
+        assert_eq!(documented, canonical);
+        assert_eq!(
+            schema["required"],
+            serde_json::json!(["type", "title", "authors"])
+        );
+    }
+    // Scenario: legacy YAML without newer URL/date fields remains readable. Requirement: REQ-111.
+    #[test]
+    fn backward_compatible_yaml() {
+        let r: Reference =
+            serde_yaml::from_str("type: article\ntitle: Old\nauthors: []\n").unwrap();
+        assert!(r.url.is_none() && r.urldate.is_none());
+    }
+    // Scenario: valid references can be authorless and corporate authors remain accepted. Requirements: REQ-115, REQ-102.
+    #[test]
+    fn authorless_and_corporate_references() {
+        let mut r: Reference =
+            serde_yaml::from_str("type: online\ntitle: Page\nauthors: []\n").unwrap();
+        assert!(r.validate().is_ok());
+        assert!(generated_key(&r).is_err());
+        r.authors = vec![Author::Organization(Organization {
+            organization: "YouTube".into(),
+        })];
+        assert!(r.validate().is_ok());
+    }
+}

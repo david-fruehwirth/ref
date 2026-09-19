@@ -8,7 +8,7 @@ use r#ref::{
 };
 
 // Scenario: Publication dates accept every supported precision and reject impossible dates.
-// Requirements: REQ-WEB-002
+// Requirements: REQ-097
 #[test]
 fn publication_date_validation() {
     for value in ["2024", "2024-10", "2024-10-03", "2024-02-29"] {
@@ -20,7 +20,7 @@ fn publication_date_validation() {
 }
 
 // Scenario: A complete web access date is required and survives YAML serialization.
-// Requirements: REQ-WEB-004, REQ-WEB-016, REQ-WEB-017
+// Requirements: REQ-099, REQ-111, REQ-112
 #[test]
 fn web_access_date_and_yaml_round_trip() {
     assert!(AccessDate::new("2026-09-19").is_ok());
@@ -39,7 +39,7 @@ fn web_access_date_and_yaml_round_trip() {
 }
 
 // Scenario: Online fields, a corporate author, and a note are emitted deterministically.
-// Requirements: REQ-WEB-001, REQ-WEB-003, REQ-WEB-005, REQ-WEB-006, REQ-WEB-007, REQ-WEB-015, REQ-WEB-018
+// Requirements: REQ-096, REQ-098, REQ-100, REQ-101, REQ-102, REQ-110, REQ-113
 #[test]
 fn exports_complete_online_reference() {
     let temp = tempfile::tempdir().unwrap();
@@ -75,7 +75,7 @@ fn exports_complete_online_reference() {
 }
 
 // Scenario: BibLaTeX web metadata survives import, YAML persistence, and export, including aliases.
-// Requirements: REQ-WEB-008, REQ-WEB-010, REQ-WEB-011, REQ-WEB-012, REQ-WEB-013, REQ-WEB-014
+// Requirements: REQ-103, REQ-105, REQ-106, REQ-107, REQ-108, REQ-109
 #[test]
 fn imports_and_round_trips_web_metadata() {
     for kind in ["online", "electronic", "www"] {

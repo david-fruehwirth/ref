@@ -8,7 +8,7 @@ tests to the requirements they validate.
 
 ## Why `ref`?
 
-`ref` is designed for terminal-centric, project-local writing workflows. It favors readable files and explicit commands over an opaque global database: metadata can be reviewed in Git, source PDFs can live beside it, and BibLaTeX can be generated whenever the document is built. Normal use requires no GUI, account, background service, or network connection; only optional DOI metadata lookup uses the network.
+`ref` is designed for terminal-centric, project-local writing workflows. It favors readable files and explicit commands over an opaque global database: metadata can be reviewed in Git, source PDFs can live beside it, and BibLaTeX can be generated whenever the document is built. Normal use requires no GUI, account, background service, or network connection; only DOI lookup and URL reachability checks use the network.
 
 ## Installation
 
@@ -229,7 +229,7 @@ ref search attention --json |
 | Command                 | Purpose                                                |
 | ----------------------- | ------------------------------------------------------ |
 | `ref init`              | Initialize a `.ref` repository                         |
-| `ref add`               | Add a reference with a PDF, without one, or from a DOI |
+| `ref add`               | Add a reference with a PDF, without one, from a DOI, or from a URL |
 | `ref list`              | List stored references                                 |
 | `ref search`            | Search bibliographic metadata                          |
 | `ref last`              | Print recently added citation keys                     |
@@ -295,6 +295,8 @@ ref add paper.pdf \
 ```
 
 `ref add --doi 10.1038/nrd842` retrieves CSL-JSON metadata through `doi.org`, creates a reference without a PDF, and requires network access plus a `curl` executable. No PDF is downloaded. If `--doi` is supplied alongside an explicit title, it is stored as manually entered metadata rather than used as the lookup source.
+
+`ref add --url https://example.org/page` checks the URL and creates an author-optional `online` scaffold; see [URL-based creation and checking](#url-based-creation-and-checking).
 
 ### `ref list`
 
@@ -598,3 +600,36 @@ This exports as:
 ```
 
 `url`, `date`, `urldate`, and YAML `notes` map to BibLaTeX `url`, `date`, `urldate`, and `note`. Legacy `year` remains supported and exports as `year`; if both `year` and `date` are present, `date` is the canonical publication date and only it is exported. Import recognizes `@online`, `@electronic`, and `@www`. A fully braced author such as `{{YouTube}}` is reliably imported as an organization; unprotected multiword names remain personal names because their corporate intent is ambiguous.
+
+### Complete `ref.yaml` field reference
+
+The machine-readable companion is [`schema/ref.schema.json`](schema/ref.schema.json), using JSON Schema draft 2020-12. Unknown fields are rejected. `type`, `title`, and `authors` are required; all other fields are optional.
+
+| Field | YAML type | Rules / allowed values | Example | BibLaTeX |
+|---|---|---|---|---|
+| `type` | string, required | `article`, `book`, `mvbook`, `inbook`, `bookinbook`, `suppbook`, `booklet`, `collection`, `mvcollection`, `incollection`, `suppcollection`, `dataset`, `manual`, `misc`, `online`, `patent`, `periodical`, `suppperiodical`, `proceedings`, `mvproceedings`, `inproceedings`, `reference`, `mvreference`, `inreference`, `report`, `set`, `software`, `thesis`, `unpublished`, `xdata` | `online` | entry type |
+| `title` | string, required | non-empty | `Example page` | `title` |
+| `authors` | array, required | ordered people (`given` + non-empty `family`) and/or organizations (`organization`); may be empty | `[{organization: Example Org}]` | `author` |
+| `year` | integer | 1000–3000 | `2026` | `year` (omitted when `date` exists) |
+| `date` | string or integer | real `YYYY`, `YYYY-MM`, or `YYYY-MM-DD` date | `2024-10-03` | `date` |
+| `container_title` | string | optional containing work | `Example Journal` | `journaltitle`/`booktitle` |
+| `publisher` | string | optional | `Example Press` | `publisher` |
+| `volume` | string | optional | `12` | `volume` |
+| `issue` | string | optional | `3` | `number` |
+| `pages` | string | optional | `10-20` | `pages` |
+| `doi` | string | DOI syntax is checked by `doctor` | `10.1234/example` | `doi` |
+| `url` | string | absolute HTTP(S) URL for URL creation | `https://example.org/page` | `url` |
+| `urldate` | string | real full `YYYY-MM-DD` access date | `2026-09-19` | `urldate` |
+| `tags` | string array | defaults to empty | `[methods]` | `keywords` |
+| `notes` | string | optional, multiline allowed | `Useful overview` | `note` |
+| `added_at` | string | application-managed UTC creation timestamp | `2026-09-19T12:00:00Z` | — |
+| `pdf_filename` | string | application-managed attachment name/path | `Example2026.pdf` | — |
+| `pdf_sha256` | string | 64 lowercase hex characters; requires `pdf_filename` | `0123…` | — |
+
+### URL-based creation and checking
+
+`ref add --url https://example.org/page` creates an `online`, no-PDF scaffold. It first validates the URL and checks it with a bounded 10-second request, follows up to five redirects, prefers `HEAD`, and retries with a minimal `GET` for common HEAD rejection statuses. A final 2xx is reachable; 4xx, 5xx, timeout, and connection/DNS/TLS failures abort without creating files. Explicit `--title`, `--author`, `--year`, `--key`, tags, container title, and publisher override or augment the scaffold. PDF, DOI, `--no-pdf`, and a non-`online` type conflict with URL mode.
+
+Authors are validly empty. Ordinary authorless adds need an explicit `--key`; URL adds instead generate a deterministic key from the host, current UTC year, and `Online`, without inventing a person or organization. The placeholder title (`[Edit title for …]`) explicitly asks for editing, and `urldate` is set to the successful UTC access date.
+
+`ref doctor` checks stored URLs by default. Reachable and redirected results are informational; client/server errors, timeouts, and connection/DNS/TLS failures are warnings (and therefore fail `--strict`). Use `ref doctor --no-network` to retain all local integrity checks while making no URL requests.

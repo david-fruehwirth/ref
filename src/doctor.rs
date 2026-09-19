@@ -8,12 +8,14 @@ use crate::{
     metadata::Doi,
     model::{CitationKey, Reference},
     repository::{sha256_file, Repository, SourceProofStatus},
+    url_check::{UrlChecker, UrlStatus},
 };
 use anyhow::Result;
 use std::{collections::HashMap, fs};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DiagnosticSeverity {
+    Info,
     Warning,
     Error,
 }
@@ -31,11 +33,14 @@ pub enum DoctorDiagnostic {
     InvalidSourcePdf { key: CitationKey, reason: String },
     MissingPdfHash { key: CitationKey },
     PdfHashMismatch { key: CitationKey },
+    UrlStatus { key: CitationKey, status: UrlStatus },
 }
 
 impl DoctorDiagnostic {
     pub fn severity(&self) -> DiagnosticSeverity {
         match self {
+            Self::UrlStatus { status, .. } if status.is_reachable() => DiagnosticSeverity::Info,
+            Self::UrlStatus { .. } => DiagnosticSeverity::Warning,
             Self::MissingYear { .. }
             | Self::MissingAuthors { .. }
             | Self::DuplicateDoi { .. }
@@ -72,6 +77,7 @@ impl DoctorDiagnostic {
             Self::PdfHashMismatch { key } => format!(
                 "{key}: source PDF integrity mismatch; verify the PDF, then run `ref hash` to refresh its hash"
             ),
+            Self::UrlStatus { key, status } => format!("{key}: URL {}", url_status_message(status)),
         }
     }
 }
@@ -102,6 +108,14 @@ impl DoctorReport {
 }
 
 pub fn inspect(repo: &Repository) -> Result<DoctorReport> {
+    inspect_with_options(repo, true, &crate::url_check::HttpUrlChecker::default())
+}
+
+pub fn inspect_with_options(
+    repo: &Repository,
+    check_urls: bool,
+    checker: &dyn UrlChecker,
+) -> Result<DoctorReport> {
     repo.validate_structure()?;
     let hashing = repo.pdf_hashing()?;
     let mut report = DoctorReport::default();
@@ -208,10 +222,20 @@ pub fn inspect(repo: &Repository) -> Result<DoctorReport> {
         }
         if let Some(doi) = metadata.doi {
             match doi.parse::<Doi>() {
-                Ok(doi) => dois.entry(doi.to_string()).or_default().push(key),
+                Ok(doi) => dois.entry(doi.to_string()).or_default().push(key.clone()),
                 Err(_) => report
                     .diagnostics
-                    .push(DoctorDiagnostic::MalformedDoi { key }),
+                    .push(DoctorDiagnostic::MalformedDoi { key: key.clone() }),
+            }
+        }
+        if check_urls {
+            if let Some(url) = metadata.url.as_deref() {
+                let status = checker
+                    .check(url)
+                    .unwrap_or_else(|error| UrlStatus::ConnectionFailure(error.to_string()));
+                report
+                    .diagnostics
+                    .push(DoctorDiagnostic::UrlStatus { key, status });
             }
         }
     }
@@ -221,4 +245,92 @@ pub fn inspect(repo: &Repository) -> Result<DoctorReport> {
             .push(DoctorDiagnostic::DuplicateDoi { keys });
     }
     Ok(report)
+}
+
+fn url_status_message(status: &UrlStatus) -> String {
+    match status {
+        UrlStatus::Reachable {
+            final_url,
+            redirected: true,
+        } => format!("redirected; reachable at {final_url}"),
+        UrlStatus::Reachable { .. } => "reachable".into(),
+        UrlStatus::ClientError(code) => format!("client error (HTTP {code})"),
+        UrlStatus::ServerError(code) => format!("server error (HTTP {code})"),
+        UrlStatus::Timeout => "timeout".into(),
+        UrlStatus::ConnectionFailure(reason) => format!("connection/DNS/TLS failure ({reason})"),
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::*;
+    use crate::{
+        model::{AccessDate, ReferenceType},
+        repository::Repository,
+    };
+    struct Fixed(UrlStatus);
+    impl UrlChecker for Fixed {
+        fn check(&self, _: &str) -> Result<UrlStatus> {
+            Ok(self.0.clone())
+        }
+    }
+    fn repo_with_url() -> (tempfile::TempDir, Repository) {
+        let t = tempfile::tempdir().unwrap();
+        let repo = Repository::init(t.path()).unwrap();
+        let r = Reference {
+            entry_type: ReferenceType::Online,
+            title: "Page".into(),
+            authors: vec![],
+            year: None,
+            date: None,
+            container_title: None,
+            publisher: None,
+            volume: None,
+            issue: None,
+            pages: None,
+            doi: None,
+            url: Some("https://example.org".into()),
+            urldate: Some(AccessDate::new("2026-09-19").unwrap()),
+            tags: vec![],
+            notes: None,
+        };
+        repo.add(&CitationKey::new("page").unwrap(), &r, None)
+            .unwrap();
+        (t, repo)
+    }
+    // Scenario: doctor distinguishes a reachable stored URL as informational. Requirement: REQ-117.
+    #[test]
+    fn reports_reachable_url() {
+        let (_t, r) = repo_with_url();
+        let report = inspect_with_options(
+            &r,
+            true,
+            &Fixed(UrlStatus::Reachable {
+                final_url: "https://example.org".into(),
+                redirected: false,
+            }),
+        )
+        .unwrap();
+        assert!(report.diagnostics.iter().any(|d| matches!(
+            d,
+            DoctorDiagnostic::UrlStatus {
+                status: UrlStatus::Reachable { .. },
+                ..
+            }
+        ) && d.severity() == DiagnosticSeverity::Info));
+    }
+    // Scenario: doctor reports an unreachable stored URL as a strict-mode warning. Requirement: REQ-117.
+    #[test]
+    fn reports_unreachable_url() {
+        let (_t, r) = repo_with_url();
+        let report = inspect_with_options(&r, true, &Fixed(UrlStatus::ServerError(503))).unwrap();
+        assert!(report.diagnostics.iter().any(|d| matches!(
+            d,
+            DoctorDiagnostic::UrlStatus {
+                status: UrlStatus::ServerError(503),
+                ..
+            }
+        ) && d.severity()
+            == DiagnosticSeverity::Warning));
+    }
 }

@@ -13,10 +13,11 @@ use r#ref::{
     launch::{self, Editor, Environment, FileOpener},
     metadata::{Doi, DoiMetadataClient},
     model::{
-        display_author, generated_key, validate_year, Author, CitationKey, Person, Reference,
-        ReferenceType,
+        display_author, generated_key, validate_year, AccessDate, Author, CitationKey, Person,
+        Reference, ReferenceType,
     },
     repository::{Repository, SourceProofStatus, StoredReference},
+    url_check::{HttpUrlChecker, UrlChecker, UrlStatus},
 };
 use std::{
     env, fs,
@@ -76,8 +77,8 @@ enum Commands {
     Init,
     /// Add a bibliographic reference, optionally with a source PDF
     #[command(
-        long_about = "Add a bibliographic reference, optionally with a source PDF.\n\nThe PDF is copied into the repository; the source file is not changed. Without --key, ref generates a citation key from the first author's family name, publication year, and title. Missing metadata is prompted for only when stdin is interactive. Use --doi by itself to retrieve metadata, or --no-pdf to enter metadata without a PDF.",
-        after_help = "Examples:\n  ref add paper.pdf\n  ref add paper.pdf --title \"Example Paper\" --author \"Jane, Smith\" --year 2024\n  ref add --no-pdf --title \"Example Paper\" --author \"Jane, Smith\" --year 2024\n  ref add --doi 10.1234/example"
+        long_about = "Add a bibliographic reference, optionally with a source PDF.\n\nThe PDF is copied into the repository; the source file is not changed. Ordinary authorless references require --key; URL adds use a deterministic host/year key when author-based generation is unavailable. Missing metadata is prompted for only when stdin is interactive. Use --doi by itself to retrieve metadata, --url for a checked online scaffold, or --no-pdf to enter metadata without a PDF.",
+        after_help = "Examples:\n  ref add paper.pdf\n  ref add --no-pdf --title \"Example Paper\" --key example\n  ref add --doi 10.1234/example\n  ref add --url https://example.org/page"
     )]
     Add(AddArgs),
     /// List references in the repository
@@ -211,13 +212,16 @@ enum Commands {
     },
     /// Check repository integrity and source completeness
     #[command(
-        long_about = "Check repository integrity and reference completeness.\n\nValidates repository structure, citation keys, metadata, DOI syntax and duplicates, and source PDFs. Missing authors, years, and source PDFs are warnings; malformed metadata and invalid or empty source PDFs are errors. Warnings do not fail normal doctor runs.",
-        after_help = "Examples:\n  ref doctor\n  ref doctor --strict"
+        long_about = "Check repository integrity and reference completeness.\n\nValidates repository structure, citation keys, metadata, DOI syntax and duplicates, and source PDFs. Missing authors, years, and source PDFs are warnings; malformed metadata and invalid or empty source PDFs are errors. Stored URLs are checked by default; use --no-network to skip them. Warnings do not fail normal doctor runs.",
+        after_help = "Examples:\n  ref doctor\n  ref doctor --strict\n  ref doctor --no-network"
     )]
     Doctor {
         /// Treat warnings as failures, returning a non-zero exit status
         #[arg(long)]
         strict: bool,
+        /// Skip URL reachability checks (useful offline and in CI)
+        #[arg(long)]
+        no_network: bool,
     },
 }
 #[derive(Args)]
@@ -254,11 +258,11 @@ struct ListArgs {
 }
 #[derive(Args)]
 struct AddArgs {
-    /// PDF to attach (required unless --no-pdf or --doi is used)
-    #[arg(required_unless_present_any = ["no_pdf", "doi"], conflicts_with_all = ["no_pdf", "doi"])]
+    /// PDF to attach (required unless --no-pdf, --doi, or --url is used)
+    #[arg(required_unless_present_any = ["no_pdf", "doi", "url"], conflicts_with_all = ["no_pdf", "doi", "url"])]
     pdf: Option<PathBuf>,
     /// Create a reference without an attached PDF
-    #[arg(long, conflicts_with = "pdf")]
+    #[arg(long, conflicts_with_all = ["pdf", "url"])]
     no_pdf: bool,
     /// Explicit citation key; otherwise generated from author, year, and title
     #[arg(long)]
@@ -273,8 +277,8 @@ struct AddArgs {
     #[arg(long, value_parser=parse_year)]
     year: Option<u16>,
     /// Bibliographic entry type
-    #[arg(long = "type", default_value = "article")]
-    entry_type: ReferenceType,
+    #[arg(long = "type")]
+    entry_type: Option<ReferenceType>,
     /// Journal, proceedings, or other containing publication title
     #[arg(long)]
     container_title: Option<String>,
@@ -285,7 +289,7 @@ struct AddArgs {
     #[arg(long)]
     doi: Option<String>,
     /// Publication URL
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["pdf", "no_pdf", "doi"])]
     url: Option<String>,
     /// Comma-separated tags; the option may also be repeated
     #[arg(long, value_delimiter = ',')]
@@ -610,7 +614,7 @@ fn execute(command: Commands, format: OutputFormat) -> Result<Execution> {
                 },
             )
         }
-        Commands::Doctor { strict } => doctor_cmd(&repo()?, strict)?,
+        Commands::Doctor { strict, no_network } => doctor_cmd(&repo()?, strict, no_network)?,
     })
 }
 
@@ -620,6 +624,9 @@ fn reference_output(repo: &Repository, key: &CitationKey) -> Result<ReferenceOut
 fn add(repo: &Repository, mut a: AddArgs, format: OutputFormat) -> Result<Execution> {
     if a.no_pdf && a.pdf.is_some() {
         bail!("a PDF and --no-pdf cannot be used together")
+    }
+    if a.url.is_some() {
+        return add_from_url(repo, a, format);
     }
     if a.title.is_none() && a.doi.is_some() {
         return add_from_doi(repo, &a, a.doi.clone().unwrap_or_default(), format);
@@ -672,7 +679,7 @@ fn add(repo: &Repository, mut a: AddArgs, format: OutputFormat) -> Result<Execut
             .map_err(Into::into)
     })?;
     let metadata = Reference {
-        entry_type: a.entry_type,
+        entry_type: a.entry_type.unwrap_or(ReferenceType::Article),
         title: a.title.unwrap_or_default(),
         authors: a.author.into_iter().map(Author::Person).collect(),
         year: a.year,
@@ -736,6 +743,119 @@ fn add_from_doi(
             reference_directory_path: repo.reference_path(&key),
         },
     ))
+}
+fn add_from_url(repo: &Repository, mut args: AddArgs, format: OutputFormat) -> Result<Execution> {
+    let value = args.url.take().context("--url requires a URL")?;
+    let parsed = r#ref::url_check::validate_url(&value)?;
+    if args
+        .entry_type
+        .is_some_and(|kind| kind != ReferenceType::Online)
+    {
+        bail!("--url only supports `--type online`");
+    }
+    if format == OutputFormat::Human {
+        eprintln!("Checking URL...");
+    }
+    let status = HttpUrlChecker::default().check(&value)?;
+    if !status.is_reachable() {
+        bail!("URL is not reachable: {}", url_status_text(&status));
+    }
+    let today = utc_today();
+    let title = args
+        .title
+        .unwrap_or_else(|| format!("[Edit title for {}]", parsed.host()));
+    let metadata = Reference {
+        entry_type: ReferenceType::Online,
+        title,
+        authors: args.author.into_iter().map(Author::Person).collect(),
+        year: args.year,
+        date: None,
+        container_title: args.container_title,
+        publisher: args.publisher,
+        volume: None,
+        issue: None,
+        pages: None,
+        doi: None,
+        url: Some(value),
+        urldate: Some(AccessDate::new(today.clone())?),
+        tags: args.tags,
+        notes: None,
+    };
+    let supplied = match args.key {
+        Some(key) => Some(key),
+        None if !metadata.authors.is_empty() && metadata.year.is_some() => None,
+        None => {
+            let base = generated_url_key(&parsed, &today[..4])?;
+            let mut candidate = base.clone();
+            let mut n = 0;
+            while repo.contains(&CitationKey::new(&candidate)?) {
+                n += 1;
+                candidate = format!("{base}{}", alphabetical_suffix(n));
+            }
+            Some(candidate)
+        }
+    };
+    let key = add_reference(repo, metadata, supplied, None, false)?;
+    Ok(Execution::success(
+        "add",
+        CommandOutput::Add {
+            created_reference: reference_output(repo, &key)?,
+            reference_directory_path: repo.reference_path(&key),
+        },
+    ))
+}
+
+fn generated_url_key(url: &r#ref::url_check::ParsedUrl, year: &str) -> Result<String> {
+    let host = url.host();
+    let component: String = host
+        .trim_start_matches("www.")
+        .split('.')
+        .flat_map(|part| part.split(|c: char| !c.is_ascii_alphanumeric()))
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            chars
+                .next()
+                .map(|c| c.to_ascii_uppercase())
+                .into_iter()
+                .chain(chars)
+                .collect::<String>()
+        })
+        .collect();
+    Ok(format!("{component}{year}Online"))
+}
+
+fn utc_today() -> String {
+    let days = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+        / 86_400;
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+fn url_status_text(status: &UrlStatus) -> String {
+    match status {
+        UrlStatus::Reachable {
+            final_url,
+            redirected: true,
+        } => format!("redirected; reachable at {final_url}"),
+        UrlStatus::Reachable { .. } => "reachable".into(),
+        UrlStatus::ClientError(code) => format!("client error (HTTP {code})"),
+        UrlStatus::ServerError(code) => format!("server error (HTTP {code})"),
+        UrlStatus::Timeout => "timeout".into(),
+        UrlStatus::ConnectionFailure(reason) => format!("connection/DNS/TLS failure ({reason})"),
+    }
 }
 fn find_doi(repo: &Repository, sought: &Doi) -> Result<Option<CitationKey>> {
     for r in repo.load_all()? {
@@ -1179,13 +1299,14 @@ fn import_cmd(repo: &Repository, path: &Path) -> Result<Execution> {
         exit_code: u8::from(partial),
     })
 }
-fn doctor_cmd(repo: &Repository, strict: bool) -> Result<Execution> {
-    let report = doctor::inspect(repo)?;
+fn doctor_cmd(repo: &Repository, strict: bool, no_network: bool) -> Result<Execution> {
+    let report = doctor::inspect_with_options(repo, !no_network, &HttpUrlChecker::default())?;
     let diagnostics = report
         .diagnostics
         .iter()
         .map(|d| {
             let severity = match d.severity() {
+                DiagnosticSeverity::Info => "info",
                 DiagnosticSeverity::Warning => "warning",
                 DiagnosticSeverity::Error => "error",
             };
@@ -1239,6 +1360,7 @@ fn doctor_code(d: &r#ref::doctor::DoctorDiagnostic) -> &'static str {
         InvalidSourcePdf { .. } => "invalid_source_pdf",
         MissingPdfHash { .. } => "missing_pdf_hash",
         PdfHashMismatch { .. } => "pdf_hash_mismatch",
+        UrlStatus { .. } => "url_status",
     }
 }
 fn absolute_path(path: &Path) -> Result<PathBuf> {

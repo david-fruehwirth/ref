@@ -7,3 +7,4 @@ pub mod launch;
 pub mod metadata;
 pub mod model;
 pub mod repository;
+pub mod url_check;
