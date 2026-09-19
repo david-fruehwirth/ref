@@ -41,10 +41,10 @@ fn imports_common_fields_authors_macros_unicode_and_no_pdf() {
         stored.metadata.title,
         "Using EEG: Müller, François, and R&D"
     );
-    assert_eq!(stored.metadata.authors[0].family, "Smith");
-    assert_eq!(stored.metadata.authors[0].given, "Jane");
-    assert_eq!(stored.metadata.authors[1].family, "Doe");
-    assert_eq!(stored.metadata.authors[1].given, "John");
+    assert_eq!(stored.metadata.authors[0].display_name(), "Smith");
+    assert_eq!(stored.metadata.authors[0].given_name(), "Jane");
+    assert_eq!(stored.metadata.authors[1].display_name(), "Doe");
+    assert_eq!(stored.metadata.authors[1].given_name(), "John");
     assert_eq!(
         stored.metadata.container_title.as_deref(),
         Some("Preferred Journal")
@@ -88,7 +88,11 @@ fn maps_entry_types_and_date() {
             .load_reference(&CitationKey::new(format!("key{i}")).unwrap())
             .unwrap();
         assert_eq!(&stored.metadata.entry_type, expected);
-        assert_eq!(stored.metadata.year, Some(2024));
+        assert_eq!(stored.metadata.year, None);
+        assert_eq!(
+            stored.metadata.date.as_ref().unwrap().as_str(),
+            "2024-05-17"
+        );
     }
 }
 

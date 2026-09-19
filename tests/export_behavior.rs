@@ -2,7 +2,7 @@ mod support;
 
 use r#ref::{
     export::biblatex,
-    model::{CitationKey, Person, ReferenceType},
+    model::{Author, CitationKey, Person, ReferenceType},
     repository::StoredReference,
 };
 use std::path::PathBuf;
@@ -13,10 +13,10 @@ fn stored(key: &str) -> StoredReference {
         "Müller",
         Some(2024),
     );
-    metadata.authors.push(Person {
+    metadata.authors.push(Author::Person(Person {
         given: "François".into(),
         family: "Curie".into(),
-    });
+    }));
     metadata.container_title = Some("Proceedings".into());
     metadata.publisher = Some("Press".into());
     metadata.volume = Some("4".into());

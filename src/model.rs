@@ -170,13 +170,152 @@ pub struct Person {
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct Organization {
+    pub organization: String,
+}
+
+/// A bibliography author is either a person or a protected corporate name.
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(untagged)]
+pub enum Author {
+    Person(Person),
+    Organization(Organization),
+}
+
+impl Author {
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::Person(person) => &person.family,
+            Self::Organization(organization) => &organization.organization,
+        }
+    }
+    pub fn given_name(&self) -> &str {
+        match self {
+            Self::Person(person) => &person.given,
+            Self::Organization(_) => "",
+        }
+    }
+}
+impl PartialEq<Person> for Author {
+    fn eq(&self, other: &Person) -> bool {
+        matches!(self, Self::Person(person) if person == other)
+    }
+}
+
+/// A validated EDTF/ISO-style publication date at year, month, or day precision.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublicationDate(String);
+
+impl PublicationDate {
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        validate_date(&value, false)?;
+        Ok(Self(value))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Serialize for PublicationDate {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for PublicationDate {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Value {
+            String(String),
+            Year(u16),
+        }
+        let value = match Value::deserialize(deserializer)? {
+            Value::String(v) => v,
+            Value::Year(v) => v.to_string(),
+        };
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccessDate(pub(crate) String);
+impl AccessDate {
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        validate_date(&value, true)?;
+        Ok(Self(value))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+impl Serialize for AccessDate {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0)
+    }
+}
+impl<'de> Deserialize<'de> for AccessDate {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        Self::new(String::deserialize(d)?).map_err(serde::de::Error::custom)
+    }
+}
+
+fn validate_date(value: &str, full_only: bool) -> Result<()> {
+    let parts: Vec<_> = value.split('-').collect();
+    if (full_only && parts.len() != 3)
+        || (!full_only && !(1..=3).contains(&parts.len()))
+        || parts[0].len() != 4
+        || parts
+            .iter()
+            .any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()))
+        || (parts.len() > 1 && parts[1].len() != 2)
+        || (parts.len() > 2 && parts[2].len() != 2)
+    {
+        bail!("invalid date `{value}`");
+    }
+    let year: u16 = parts[0].parse()?;
+    validate_year(year)?;
+    if parts.len() > 1 {
+        let month: u8 = parts[1].parse()?;
+        if !(1..=12).contains(&month) {
+            bail!("invalid date `{value}`");
+        }
+        if parts.len() > 2 {
+            let day: u8 = parts[2].parse()?;
+            let leap =
+                year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+            let max = match month {
+                2 if leap => 29,
+                2 => 28,
+                4 | 6 | 9 | 11 => 30,
+                _ => 31,
+            };
+            if day == 0 || day > max {
+                bail!("invalid date `{value}`");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Reference {
     #[serde(rename = "type")]
     pub entry_type: ReferenceType,
     pub title: String,
-    pub authors: Vec<Person>,
+    pub authors: Vec<Author>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub year: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<PublicationDate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub container_title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -191,6 +330,8 @@ pub struct Reference {
     pub doi: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub urldate: Option<AccessDate>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -203,8 +344,14 @@ impl Reference {
             bail!("title is empty");
         }
         for (i, author) in self.authors.iter().enumerate() {
-            if author.family.trim().is_empty() {
-                bail!("author {} has an empty family name", i + 1);
+            match author {
+                Author::Person(a) if a.family.trim().is_empty() => {
+                    bail!("author {} has an empty family name", i + 1)
+                }
+                Author::Organization(a) if a.organization.trim().is_empty() => {
+                    bail!("author {} has an empty organization name", i + 1)
+                }
+                _ => {}
             }
         }
         if let Some(year) = self.year {
@@ -241,7 +388,7 @@ pub fn generated_key(reference: &Reference) -> Result<CitationKey> {
     })?;
 
     let author_component: String = author
-        .family
+        .display_name()
         .split_whitespace()
         .map(normalize_name_part)
         .collect();
@@ -361,12 +508,26 @@ fn transliterate_latin(value: &str) -> String {
     })
 }
 
-pub fn display_author(authors: &[Person]) -> String {
+pub trait AuthorName {
+    fn author_name(&self) -> &str;
+}
+impl AuthorName for Author {
+    fn author_name(&self) -> &str {
+        self.display_name()
+    }
+}
+impl AuthorName for Person {
+    fn author_name(&self) -> &str {
+        &self.family
+    }
+}
+
+pub fn display_author<T: AuthorName>(authors: &[T]) -> String {
     match authors {
         [] => "-".into(),
-        [a] => a.family.clone(),
-        [a, b] => format!("{} & {}", a.family, b.family),
-        [a, ..] => format!("{} et al.", a.family),
+        [a] => a.author_name().to_owned(),
+        [a, b] => format!("{} & {}", a.author_name(), b.author_name()),
+        [a, ..] => format!("{} et al.", a.author_name()),
     }
 }
 
@@ -391,11 +552,12 @@ mod tests {
         let reference = Reference {
             entry_type: ReferenceType::Article,
             title: "Relevance Feedback in Information Retrieval".into(),
-            authors: vec![Person {
+            authors: vec![Author::Person(Person {
                 given: "Joseph".into(),
                 family: "Rocchio".into(),
-            }],
+            })],
             year: Some(1971),
+            date: None,
             container_title: None,
             publisher: None,
             volume: None,
@@ -403,6 +565,7 @@ mod tests {
             pages: None,
             doi: None,
             url: None,
+            urldate: None,
             tags: vec![],
             notes: None,
         };

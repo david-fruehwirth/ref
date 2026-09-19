@@ -570,3 +570,31 @@ Inspect the CLI locally with:
 cargo run -- --help
 cargo run -- <command> --help
 ```
+
+### Website and online citations
+
+Online sources use the same transparent `ref.yaml` metadata as other references. A publication `date` accepts `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`; `urldate` records access with full `YYYY-MM-DD` precision. Authors can be people (`given` and `family`) or organizations (`organization`), including a mixed ordered list.
+
+```yaml
+type: online
+title: Example Documentation
+authors:
+  - organization: Example Organization
+date: 2026-04-15
+url: https://example.org/docs
+urldate: 2026-09-19
+```
+
+This exports as:
+
+```bibtex
+@online{ExampleOrganization2026ExampleDocumentation,
+  author  = {{Example Organization}},
+  title   = {Example Documentation},
+  date    = {2026-04-15},
+  url     = {https://example.org/docs},
+  urldate = {2026-09-19},
+}
+```
+
+`url`, `date`, `urldate`, and YAML `notes` map to BibLaTeX `url`, `date`, `urldate`, and `note`. Legacy `year` remains supported and exports as `year`; if both `year` and `date` are present, `date` is the canonical publication date and only it is exported. Import recognizes `@online`, `@electronic`, and `@www`. A fully braced author such as `{{YouTube}}` is reliably imported as an organization; unprotected multiword names remain personal names because their corporate intent is ambiguous.

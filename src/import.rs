@@ -7,7 +7,8 @@
 
 use crate::{
     model::{
-        resolve_entry_type, CitationKey, Person, Reference, ReferenceType, ResolvedReferenceType,
+        resolve_entry_type, AccessDate, Author, CitationKey, Organization, Person, PublicationDate,
+        Reference, ReferenceType, ResolvedReferenceType,
     },
     repository::Repository,
 };
@@ -150,21 +151,15 @@ fn convert(entry: &BibEntry) -> Result<(Reference, Option<String>)> {
         .map(|value| parse_names(&value))
         .transpose()?
         .unwrap_or_default();
-    let year = if let Some(value) = field("year") {
-        Some(
+    let year = field("year")
+        .map(|value| {
             value
                 .parse::<u16>()
-                .with_context(|| format!("invalid year `{value}`"))?,
-        )
-    } else {
-        field("date").and_then(|date| {
-            let prefix = date.get(..4)?;
-            (prefix.bytes().all(|c| c.is_ascii_digit())
-                && (date.len() == 4 || date.as_bytes().get(4) == Some(&b'-')))
-            .then(|| prefix.parse().ok())
-            .flatten()
+                .with_context(|| format!("invalid year `{value}`"))
         })
-    };
+        .transpose()?;
+    let date = field("date").map(PublicationDate::new).transpose()?;
+    let urldate = field("urldate").map(AccessDate::new).transpose()?;
     let container_title = match entry_type {
         ReferenceType::Article => field("journaltitle").or_else(|| field("journal")),
         ReferenceType::Inbook | ReferenceType::Incollection | ReferenceType::Inproceedings => {
@@ -177,6 +172,7 @@ fn convert(entry: &BibEntry) -> Result<(Reference, Option<String>)> {
         title,
         authors,
         year,
+        date,
         container_title,
         publisher: field("publisher"),
         volume: field("volume"),
@@ -184,6 +180,7 @@ fn convert(entry: &BibEntry) -> Result<(Reference, Option<String>)> {
         pages: field("pages").map(|p| normalize_pages(&p)),
         doi: field("doi").map(|doi| normalize_doi(&doi)),
         url: field("url"),
+        urldate,
         tags: field("keywords")
             .map(|keywords| {
                 keywords
@@ -225,7 +222,7 @@ fn normalize_doi(value: &str) -> String {
         .to_owned()
 }
 
-fn parse_names(input: &str) -> Result<Vec<Person>> {
+fn parse_names(input: &str) -> Result<Vec<Author>> {
     split_top_level(input, " and ")
         .into_iter()
         .map(|name| {
@@ -233,26 +230,31 @@ fn parse_names(input: &str) -> Result<Vec<Person>> {
             if name.is_empty() {
                 bail!("empty author name");
             }
+            if name.starts_with('{') && name.ends_with('}') && name.len() >= 2 {
+                return Ok(Author::Organization(Organization {
+                    organization: name[1..name.len() - 1].to_owned(),
+                }));
+            }
             if let Some((family, given)) = split_comma(name) {
                 if family.trim().is_empty() {
                     bail!("author has an empty family name");
                 }
-                Ok(Person {
+                Ok(Author::Person(Person {
                     given: given.trim().to_owned(),
                     family: family.trim().to_owned(),
-                })
+                }))
             } else {
                 let words: Vec<_> = name.split_whitespace().collect();
                 if words.len() == 1 {
-                    Ok(Person {
+                    Ok(Author::Person(Person {
                         given: String::new(),
                         family: words[0].to_owned(),
-                    })
+                    }))
                 } else {
-                    Ok(Person {
+                    Ok(Author::Person(Person {
                         given: words[..words.len() - 1].join(" "),
                         family: words[words.len() - 1].to_owned(),
-                    })
+                    }))
                 }
             }
         })
@@ -366,7 +368,13 @@ impl<'a> Parser<'a> {
             let name = self.identifier()?.to_ascii_lowercase();
             self.space();
             self.expect(b'=')?;
-            let value = self.value()?;
+            let mut value = self.value()?;
+            // Author braces carry name semantics (a fully braced name is a
+            // corporate author). Other supported fields retain the historical
+            // behavior of discarding BibTeX grouping braces.
+            if name != "author" {
+                value.retain(|character| !matches!(character, '{' | '}'));
+            }
             fields.insert(name, value);
             self.space();
             match self.peek() {
@@ -426,13 +434,17 @@ impl<'a> Parser<'a> {
                         output.push(next);
                     }
                 }
-                b'{' => depth += 1,
+                b'{' => {
+                    depth += 1;
+                    output.push(byte);
+                }
                 b'}' => {
                     depth -= 1;
                     if depth == 0 {
                         return String::from_utf8(output)
                             .context("bibliography value is not UTF-8");
                     }
+                    output.push(byte);
                 }
                 _ => output.push(byte),
             }

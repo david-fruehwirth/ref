@@ -1,5 +1,5 @@
 use super::doi::Doi;
-use crate::model::{Person, Reference, ReferenceType};
+use crate::model::{Author, Person, Reference, ReferenceType};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -44,20 +44,22 @@ impl CslItem {
             }
         }
         let title = required_text(self.title, "title")?;
-        let authors: Vec<Person> = self
+        let authors: Vec<Author> = self
             .author
             .unwrap_or_default()
             .into_iter()
             .filter_map(|name| {
                 if let Some(literal) = nonempty(name.literal) {
-                    return Some(Person {
+                    return Some(Author::Person(Person {
                         given: String::new(),
                         family: literal,
-                    });
+                    }));
                 }
-                nonempty(name.family).map(|family| Person {
-                    given: nonempty(name.given).unwrap_or_default(),
-                    family,
+                nonempty(name.family).map(|family| {
+                    Author::Person(Person {
+                        given: nonempty(name.given).unwrap_or_default(),
+                        family,
+                    })
                 })
             })
             .collect();
@@ -74,6 +76,7 @@ impl CslItem {
             title,
             authors,
             year: Some(year),
+            date: None,
             container_title: nonempty(self.container_title),
             publisher: nonempty(self.publisher),
             volume: nonempty(self.volume),
@@ -81,6 +84,7 @@ impl CslItem {
             pages: nonempty(self.page),
             doi: Some(requested_doi.to_string()),
             url: nonempty(self.url),
+            urldate: None,
             tags: vec![],
             notes: None,
         };
@@ -131,7 +135,10 @@ mod tests {
             assert_eq!(reference.entry_type, ReferenceType::Article);
             assert_eq!(reference.title, "Example Article");
             assert_eq!(reference.authors.len(), 2);
-            assert_eq!(reference.authors[1].family, "World Health Organization");
+            assert_eq!(
+                reference.authors[1].display_name(),
+                "World Health Organization"
+            );
             assert_eq!(reference.year, Some(2024));
             assert_eq!(
                 reference.container_title.as_deref(),

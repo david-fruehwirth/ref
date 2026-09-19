@@ -313,10 +313,12 @@ fn list_and_search_render_the_same_ordered_reference_blocks() {
     let temp = tempfile::tempdir().unwrap();
     let repo = r#ref::repository::Repository::init(temp.path()).unwrap();
     let mut first = support::sample("Études of Attention", "Núñez", Some(2024));
-    first.authors.push(r#ref::model::Person {
-        given: "Zoë".into(),
-        family: "李".into(),
-    });
+    first
+        .authors
+        .push(r#ref::model::Author::Person(r#ref::model::Person {
+            given: "Zoë".into(),
+            family: "李".into(),
+        }));
     support::add(&repo, "Alpha2024", &first);
     let mut second = support::sample("Attention Without Dates", "", None);
     second.authors.clear();

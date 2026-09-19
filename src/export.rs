@@ -1,4 +1,4 @@
-use crate::repository::StoredReference;
+use crate::{model::Author, repository::StoredReference};
 
 pub fn biblatex(refs: &[StoredReference]) -> String {
     let mut refs = refs.to_vec();
@@ -13,7 +13,10 @@ fn entry(stored: &StoredReference) -> String {
             "author",
             r.authors
                 .iter()
-                .map(|a| format!("{}, {}", escape(&a.family), escape(&a.given)))
+                .map(|a| match a {
+                    Author::Person(a) => format!("{}, {}", escape(&a.family), escape(&a.given)),
+                    Author::Organization(a) => format!("{{{}}}", escape(&a.organization)),
+                })
                 .collect::<Vec<_>>()
                 .join(" and "),
         ),
@@ -29,7 +32,10 @@ fn entry(stored: &StoredReference) -> String {
             escape(v),
         ));
     }
-    if let Some(v) = r.year {
+    // A precise date is canonical when both legacy `year` and `date` exist.
+    if let Some(v) = &r.date {
+        fields.push(("date", v.as_str().to_owned()));
+    } else if let Some(v) = r.year {
         fields.push(("year", v.to_string()));
     }
     for (name, value) in [
@@ -38,6 +44,7 @@ fn entry(stored: &StoredReference) -> String {
         ("number", r.issue.as_ref()),
         ("doi", r.doi.as_ref()),
         ("url", r.url.as_ref()),
+        ("urldate", r.urldate.as_ref().map(|v| &v.0)),
     ] {
         if let Some(v) = value {
             fields.push((name, escape(v)));
@@ -45,6 +52,9 @@ fn entry(stored: &StoredReference) -> String {
     }
     if let Some(v) = &r.pages {
         fields.push(("pages", normalize_pages(v)));
+    }
+    if let Some(v) = &r.notes {
+        fields.push(("note", escape(v)));
     }
     let width = fields.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
     let body = fields
@@ -87,7 +97,7 @@ fn normalize_pages(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::{
-        model::{CitationKey, Person, Reference, ReferenceType},
+        model::{Author, CitationKey, Person, Reference, ReferenceType},
         repository::StoredReference,
     };
     use std::path::PathBuf;
@@ -104,11 +114,12 @@ mod tests {
             metadata: Reference {
                 entry_type: ReferenceType::Article,
                 title: "A & B".into(),
-                authors: vec![Person {
+                authors: vec![Author::Person(Person {
                     given: "Jane".into(),
                     family: "Smith".into(),
-                }],
+                })],
                 year: Some(2024),
+                date: None,
                 container_title: Some("Journal".into()),
                 publisher: None,
                 volume: None,
@@ -116,6 +127,7 @@ mod tests {
                 pages: Some("12-19".into()),
                 doi: Some("10.1/x".into()),
                 url: None,
+                urldate: None,
                 tags: vec![],
                 notes: None,
             },

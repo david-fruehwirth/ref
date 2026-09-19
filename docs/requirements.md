@@ -559,3 +559,59 @@ plain results remain suitable for stdout redirection.
 Human reference-summary formatting and color shall not alter list or search JSON
 output, which shall continue to use the existing schema, fields, values, and
 versioned envelope without terminal control sequences.
+
+## Web citations
+
+### REQ-WEB-001: Online references
+Metadata shall accept the existing `online` type and export it as `@online`.
+
+### REQ-WEB-002: Publication date
+The optional `date` shall be a real calendar date in `YYYY`, `YYYY-MM`, or `YYYY-MM-DD` form; malformed and impossible dates shall be rejected.
+
+### REQ-WEB-003: Existing year compatibility
+Existing numeric `year` metadata remains valid. Export emits `year` when no `date` exists; when both exist, `date` is canonical and export omits `year` to avoid conflicting publication dates.
+
+### REQ-WEB-004: Access date
+The optional `urldate` shall be a real calendar date with full `YYYY-MM-DD` precision.
+
+### REQ-WEB-005: URL export
+A stored `url` shall be emitted as the BibLaTeX `url` field.
+
+### REQ-WEB-006: URL date export
+A stored `urldate` shall be emitted as the BibLaTeX `urldate` field.
+
+### REQ-WEB-007: Corporate authors
+An author represented by `organization` shall be emitted as a brace-protected BibLaTeX corporate author.
+
+### REQ-WEB-008: Mixed author types
+Personal and corporate authors may coexist and their source order shall be preserved.
+
+### REQ-WEB-009: Author validation
+A person requires a non-empty family name, an organization requires a non-empty name, and one author entry may not contain both representations.
+
+### REQ-WEB-010: BibLaTeX import
+`@online`, plus the `@electronic` and `@www` aliases, shall import as `online`.
+
+### REQ-WEB-011: Date import
+Import shall preserve a supported `date` at its original precision rather than reducing it to `year`.
+
+### REQ-WEB-012: URL date import
+Import shall map BibLaTeX `urldate` to YAML `urldate`.
+
+### REQ-WEB-013: Corporate-author import
+An individually fully braced BibLaTeX name (for example `{{YouTube}}`) shall import as an organization. This purpose-built parser does not infer corporate identity from unprotected multiword names.
+
+### REQ-WEB-014: Round-trip preservation
+Supported online type, title, author, date, year, URL, and URL-access-date semantics shall survive BibLaTeX-to-YAML-to-BibLaTeX conversion.
+
+### REQ-WEB-015: Notes export
+YAML `notes` shall export as BibLaTeX `note`; import of `note` remains supported.
+
+### REQ-WEB-016: Existing data compatibility
+Repositories without web fields shall deserialize without migration.
+
+### REQ-WEB-017: Unknown YAML fields
+Strict metadata deserialization shall continue to reject unknown fields.
+
+### REQ-WEB-018: Deterministic export
+New web fields shall use the existing stable ordering, escaping, and alignment rules.

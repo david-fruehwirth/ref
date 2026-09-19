@@ -222,8 +222,8 @@ impl ReferenceOutput {
                 .authors
                 .iter()
                 .map(|a| AuthorOutput {
-                    given_names: a.given.clone(),
-                    family_name: a.family.clone(),
+                    given_names: a.given_name().to_owned(),
+                    family_name: a.display_name().to_owned(),
                 })
                 .collect(),
             publication_year: m.year,
