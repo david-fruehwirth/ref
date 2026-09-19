@@ -97,6 +97,7 @@ mod tests {
             path: PathBuf::new(),
             has_pdf: false,
             pdf_filename: None,
+            pdf_sha256: None,
             pdf_path: None,
             pdf_is_managed: false,
             added_at: None,

@@ -206,6 +206,11 @@ pub struct PdfMigrationOutput {
     pub destination_path: PathBuf,
 }
 
+#[derive(Clone, Serialize)]
+pub struct PdfHashOutput {
+    pub citation_key: String,
+}
+
 impl ReferenceOutput {
     pub fn from_stored(r: &r#ref::repository::StoredReference) -> Self {
         let m = &r.metadata;
@@ -271,6 +276,11 @@ pub enum CommandOutput {
     Attach {
         citation_key: String,
         source_pdf_path: PathBuf,
+    },
+    Hash {
+        dry_run: bool,
+        updated_references: Vec<PdfHashOutput>,
+        skipped_references: Vec<PdfHashOutput>,
     },
     Edit {
         citation_key: String,
@@ -374,6 +384,34 @@ impl HumanRenderable for CommandOutput {
             Self::Open { .. } => (),
             Self::Attach { citation_key, .. } => {
                 writeln!(w, "Attached source PDF to {citation_key}")?
+            }
+            Self::Hash {
+                dry_run,
+                updated_references,
+                skipped_references,
+            } => {
+                for reference in updated_references {
+                    writeln!(
+                        w,
+                        "{}: {} integrity hash",
+                        reference.citation_key,
+                        if *dry_run { "would update" } else { "updated" }
+                    )?;
+                }
+                for reference in skipped_references {
+                    writeln!(
+                        w,
+                        "{}: skipped (source PDF unavailable)",
+                        reference.citation_key
+                    )?;
+                }
+                writeln!(
+                    w,
+                    "{} {} hash(es); {} unavailable PDF(s).",
+                    if *dry_run { "Would update" } else { "Updated" },
+                    updated_references.len(),
+                    skipped_references.len()
+                )?;
             }
             Self::Edit { .. } => (),
             Self::Rename {

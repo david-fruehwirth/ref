@@ -3,7 +3,7 @@ mod output;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input};
 use output::{
-    BatchDiagnostic, CommandOutput, DiagnosticOutput, OperationStatus, OutputFormat,
+    BatchDiagnostic, CommandOutput, DiagnosticOutput, OperationStatus, OutputFormat, PdfHashOutput,
     PdfMigrationOutput, RecentReferenceOutput, ReferenceOutput, WarningOutput,
 };
 use r#ref::{
@@ -127,6 +127,16 @@ enum Commands {
         key: String,
         /// PDF file to copy into the reference repository
         pdf: PathBuf,
+    },
+    /// Create or refresh integrity hashes for available source PDFs
+    #[command(
+        long_about = "Compute SHA-256 integrity hashes for all available source PDFs and store them in ref.yaml. PDFs are never modified. Hashing must be enabled in config.yaml.",
+        after_help = "Examples:\n  ref hash\n  ref hash --dry-run\n  ref hash --json"
+    )]
+    Hash {
+        /// Report hashes that would be updated without changing metadata
+        #[arg(long, short = 'n')]
+        dry_run: bool,
     },
     /// Edit a reference's YAML metadata in $VISUAL or $EDITOR
     #[command(
@@ -442,6 +452,7 @@ fn command_name(c: &Commands) -> &'static str {
         Commands::Show { .. } => "show",
         Commands::Open { .. } => "open",
         Commands::Attach { .. } => "attach",
+        Commands::Hash { .. } => "hash",
         Commands::Edit { .. } => "edit",
         Commands::Rename { .. } => "rename",
         Commands::Remove { .. } => "remove",
@@ -517,6 +528,27 @@ fn execute(command: Commands, format: OutputFormat) -> Result<Execution> {
                         .load_reference(&key)?
                         .pdf_path
                         .context("attached PDF path missing")?,
+                },
+            )
+        }
+        Commands::Hash { dry_run } => {
+            let (updated, skipped) = repo()?.refresh_pdf_hashes(dry_run)?;
+            Execution::success(
+                "hash",
+                CommandOutput::Hash {
+                    dry_run,
+                    updated_references: updated
+                        .into_iter()
+                        .map(|key| PdfHashOutput {
+                            citation_key: key.to_string(),
+                        })
+                        .collect(),
+                    skipped_references: skipped
+                        .into_iter()
+                        .map(|key| PdfHashOutput {
+                            citation_key: key.to_string(),
+                        })
+                        .collect(),
                 },
             )
         }
@@ -1202,6 +1234,8 @@ fn doctor_code(d: &r#ref::doctor::DoctorDiagnostic) -> &'static str {
         DuplicateDoi { .. } => "duplicate_doi",
         MissingSourcePdf { .. } => "missing_source_pdf",
         InvalidSourcePdf { .. } => "invalid_source_pdf",
+        MissingPdfHash { .. } => "missing_pdf_hash",
+        PdfHashMismatch { .. } => "pdf_hash_mismatch",
     }
 }
 fn absolute_path(path: &Path) -> Result<PathBuf> {

@@ -76,6 +76,7 @@ configuration and a representative metadata file include:
 version: 1
 pdf_directories:
   - source
+pdf_hashing: true
 ```
 
 ```yaml
@@ -97,6 +98,7 @@ tags:
 notes: |
   Relevant to the methodology section.
 pdf_filename: Example2024Paper.pdf
+pdf_sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
 These field names are part of the stored format. Manual editing of `.ref/refs/<key>/ref.yaml` is supported, either directly or with `ref edit <key>`; run `ref doctor` afterward to detect many mistakes. Use `ref rename` rather than manually renaming a reference directory.
@@ -143,14 +145,22 @@ are resolved from `.ref`; absolute entries are supported when PDFs live elsewher
 New PDFs are copied to the first directory, which is created lazily, named
 `<citation-key>.pdf`, and stored as that basename in `pdf_filename`.
 
+PDF integrity hashing is enabled by default, including for older configuration
+files that omit `pdf_hashing`. When adding or attaching a PDF, `ref` streams it
+through SHA-256 and stores the lowercase digest as `pdf_sha256`. To opt out
+globally, set `pdf_hashing: false` in `.ref/config.yaml`; existing hashes are
+retained, but no command computes or verifies them.
+
 Existing `pdf_filename` values may be plain names, relative paths, or absolute
 paths. Relative values are searched beneath each configured directory in order,
 then relative to `.ref`; absolute values are checked directly. The first readable,
 non-empty regular file wins. Direct fallback paths are external and are never
 renamed or deleted automatically.
 
-`ref doctor` reports a missing source PDF as a warning. An unreadable, empty, or
-non-file resolved PDF is an error. `ref doctor --strict` is therefore useful as a
+`ref doctor` reports a missing source PDF as a warning. With hashing enabled, it
+also verifies stored hashes: a mismatch is an integrity error and a PDF lacking
+a hash produces a warning with a `ref hash` hint. Doctor never modifies metadata.
+An unreadable, empty, or non-file resolved PDF is an error. `ref doctor --strict` is therefore useful as a
 final thesis-quality check requiring a canonical local source artifact for every
 reference.
 
@@ -163,6 +173,15 @@ ref migrate-pdfs
 ```
 
 Migration refuses destination collisions and never overwrites an existing file.
+
+Refresh missing or intentionally outdated hashes safely with a preview-first
+workflow (external PDF files are read, never changed):
+
+```bash
+ref hash --dry-run
+ref hash
+ref doctor
+```
 
 A PDF indicates only local source availability. Its presence does not establish that it is the correct publication, was read, supports a claim, or is scientifically valid.
 
@@ -217,6 +236,7 @@ ref search attention --json |
 | `ref show`              | Show one exact citation key                            |
 | `ref open`              | Open a reference's source PDF                          |
 | `ref attach`            | Attach a PDF to an existing reference                  |
+| `ref hash`              | Refresh PDF SHA-256 integrity hashes                   |
 | `ref edit`              | Edit YAML metadata                                     |
 | `ref rename`            | Change a citation key                                  |
 | `ref remove` / `ref rm` | Remove a reference and its files                       |
