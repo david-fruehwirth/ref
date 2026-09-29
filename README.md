@@ -628,7 +628,7 @@ The machine-readable companion is [`schema/ref.schema.json`](schema/ref.schema.j
 
 ### URL-based creation and checking
 
-`ref add --url https://example.org/page` creates an `online`, no-PDF scaffold. It first validates the URL and checks it with a bounded 10-second request, follows up to five redirects, prefers `HEAD`, and retries with a minimal `GET` for common HEAD rejection statuses. A final 2xx is reachable; 4xx, 5xx, timeout, and connection/DNS/TLS failures abort without creating files. Explicit `--title`, `--author`, `--year`, `--key`, tags, container title, and publisher override or augment the scaffold. PDF, DOI, `--no-pdf`, and a non-`online` type conflict with URL mode.
+`ref add --url https://example.org/page` creates an `online`, no-PDF scaffold. It first validates the URL and checks it with a bounded 10-second request, follows up to five redirects, prefers `HEAD`, and confirms any `HEAD` client error with a minimal `GET` because some servers return misleading statuses for `HEAD`. A final 2xx is reachable; a GET-confirmed 4xx, 5xx, timeout, and connection/DNS/TLS failures abort without creating files. Explicit `--title`, `--author`, `--year`, `--key`, tags, container title, and publisher override or augment the scaffold. PDF, DOI, `--no-pdf`, and a non-`online` type conflict with URL mode.
 
 Authors are validly empty. Ordinary authorless adds need an explicit `--key`; URL adds instead generate a deterministic key from the host, current UTC year, and `Online`, without inventing a person or organization. The placeholder title (`[Edit title for …]`) explicitly asks for editing, and `urldate` is set to the successful UTC access date.
 
