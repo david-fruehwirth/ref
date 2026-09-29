@@ -123,7 +123,11 @@ impl UrlChecker for HttpUrlChecker {
     fn check(&self, value: &str) -> Result<UrlStatus> {
         validate_url(value)?;
         let s = self.request(value, true);
-        if matches!(s, UrlStatus::ClientError(403 | 405 | 501)) {
+        // Some origins implement GET but return a misleading client error for
+        // HEAD (including 404), so a HEAD 4xx cannot establish that the URL is
+        // unreachable. Confirm it with the same bounded, minimal GET that is
+        // used for explicit HEAD rejections.
+        if matches!(s, UrlStatus::ClientError(_)) {
             Ok(self.request(value, false))
         } else {
             Ok(s)
@@ -213,16 +217,31 @@ mod tests {
             UrlStatus::Timeout
         );
     }
-    // Scenario: rejected HEAD falls back to a minimal GET. Requirement: REQ-116.
+    // Scenario: a misleading HEAD client error falls back to a minimal GET. Requirement: REQ-116.
     #[test]
-    fn head_fallback() {
+    fn head_client_error_falls_back_to_get() {
         let u = server(vec![
-            "HTTP/1.1 405 Nope\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 404 Nope\r\nConnection: close\r\n\r\n",
             "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n",
         ]);
         assert!(HttpUrlChecker::new(Duration::from_secs(1))
             .check(&u)
             .unwrap()
             .is_reachable());
+    }
+
+    // Scenario: a GET-confirmed client error remains unreachable. Requirement: REQ-116.
+    #[test]
+    fn get_confirms_head_client_error() {
+        let u = server(vec![
+            "HTTP/1.1 404 Nope\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 404 Nope\r\nConnection: close\r\n\r\n",
+        ]);
+        assert_eq!(
+            HttpUrlChecker::new(Duration::from_secs(1))
+                .check(&u)
+                .unwrap(),
+            UrlStatus::ClientError(404)
+        );
     }
 }

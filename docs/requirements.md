@@ -207,7 +207,7 @@ shall reject competing source modes.
 URL adds without enough author/year metadata for the normal key algorithm shall use a deterministic host, current UTC year, and `Online` key; no author is invented. Other authorless adds require `--key`.
 
 ### REQ-116: URL reachability policy
-One shared checker shall follow at most five redirects, use a ten-second bounded request, accept final 2xx responses, report 4xx and 5xx separately, distinguish timeout from connection/DNS/TLS failure, and retry HEAD with a minimal GET when HEAD returns 403, 405, or 501.
+One shared checker shall follow at most five redirects, use a ten-second bounded request, accept final 2xx responses, report 4xx and 5xx separately, distinguish timeout from connection/DNS/TLS failure, and confirm any HEAD 4xx with a minimal GET because servers may return a misleading client error for HEAD.
 
 ### REQ-015: PDF copying
 
