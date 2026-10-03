@@ -445,7 +445,10 @@ impl HumanRenderable for CommandOutput {
                         input_bibliography_path.display()
                     )?;
                 } else {
-                    writeln!(w, "Import complete with errors.\n\nEntries:  {entries_found}\nImported: {references_imported}\nSkipped:  {references_skipped}\nFailed:   {references_failed}")?;
+                    writeln!(
+                        w,
+                        "Import complete with errors.\n\nEntries:  {entries_found}\nImported: {references_imported}\nSkipped:  {references_skipped}\nFailed:   {references_failed}"
+                    )?;
                 }
             }
             Self::MigratePdfs { dry_run, changes } => {
@@ -480,7 +483,12 @@ impl HumanRenderable for CommandOutput {
                 references_removed,
                 ..
             } => {
-                writeln!(w, "Repository:\n  {}\n\nScan root:\n  {}\n\nFiles scanned: {eligible_files_scanned}\nReferences:    {reference_count}\nUsed:          {used_reference_count}\nUnused:        {unused_reference_count}", repository_root_path.display(), scan_root_path.display())?;
+                writeln!(
+                    w,
+                    "Repository:\n  {}\n\nScan root:\n  {}\n\nFiles scanned: {eligible_files_scanned}\nReferences:    {reference_count}\nUsed:          {used_reference_count}\nUnused:        {unused_reference_count}",
+                    repository_root_path.display(),
+                    scan_root_path.display()
+                )?;
                 let project_root = repository_root_path
                     .parent()
                     .unwrap_or(repository_root_path);
@@ -523,7 +531,16 @@ impl HumanRenderable for CommandOutput {
                 diagnostics,
                 ..
             } => {
-                writeln!(w, "Repository: {}\n\n✓ configuration valid\n✓ {reference_count} references discovered\n{} {references_with_source_pdf} / {reference_count} references have source PDFs", repository_root_path.display(), if *error_count == 0 && *warning_count == 0 { "✓" } else { "!" })?;
+                writeln!(
+                    w,
+                    "Repository: {}\n\n✓ configuration valid\n✓ {reference_count} references discovered\n{} {references_with_source_pdf} / {reference_count} references have source PDFs",
+                    repository_root_path.display(),
+                    if *error_count == 0 && *warning_count == 0 {
+                        "✓"
+                    } else {
+                        "!"
+                    }
+                )?;
                 for heading in ["warning", "error"] {
                     let ds: Vec<_> = diagnostics
                         .iter()
@@ -544,7 +561,10 @@ impl HumanRenderable for CommandOutput {
                         }
                     }
                 }
-                writeln!(w, "\n{reference_count} references, {warning_count} warnings, {error_count} errors")?;
+                writeln!(
+                    w,
+                    "\n{reference_count} references, {warning_count} warnings, {error_count} errors"
+                )?;
             }
         }
         Ok(())

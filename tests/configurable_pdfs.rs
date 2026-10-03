@@ -194,11 +194,12 @@ fn configured_directory_validation_and_lazy_creation() {
     let temp = tempfile::tempdir().unwrap();
     let repo = Repository::init(temp.path()).unwrap();
     fs::write(repo.root().join("source"), "not a directory").unwrap();
-    assert!(repo
-        .validate_structure()
-        .unwrap_err()
-        .to_string()
-        .contains("not a directory"));
+    assert!(
+        repo.validate_structure()
+            .unwrap_err()
+            .to_string()
+            .contains("not a directory")
+    );
     fs::remove_file(repo.root().join("source")).unwrap();
     let input = temp.path().join("input.pdf");
     fs::write(&input, b"%PDF").unwrap();
@@ -286,11 +287,12 @@ fn failed_migration_preserves_legacy_pdf() {
     fs::write(&legacy, b"original").unwrap();
     fs::create_dir(repo.root().join("source")).unwrap();
     fs::write(repo.root().join("source/Legacy.pdf"), b"unmanaged").unwrap();
-    assert!(repo
-        .migrate_pdfs(false)
-        .unwrap_err()
-        .to_string()
-        .contains("already exists"));
+    assert!(
+        repo.migrate_pdfs(false)
+            .unwrap_err()
+            .to_string()
+            .contains("already exists")
+    );
     assert_eq!(fs::read(legacy).unwrap(), b"original");
     assert_eq!(
         fs::read(repo.root().join("source/Legacy.pdf")).unwrap(),

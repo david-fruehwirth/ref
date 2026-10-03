@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
@@ -393,7 +393,9 @@ pub fn generated_key(reference: &Reference) -> Result<CitationKey> {
         .map(normalize_name_part)
         .collect();
     if author_component.is_empty() {
-        bail!("cannot generate a citation key from the first author's family name\nhint: specify a citation key with `--key`");
+        bail!(
+            "cannot generate a citation key from the first author's family name\nhint: specify a citation key with `--key`"
+        );
     }
 
     let words: Vec<&str> = reference
@@ -421,7 +423,9 @@ pub fn generated_key(reference: &Reference) -> Result<CitationKey> {
         .map(|word| normalize_title_word(word))
         .collect();
     if title_component.is_empty() {
-        bail!("cannot generate a citation key because the title contains no usable words\nhint: specify a citation key with `--key`");
+        bail!(
+            "cannot generate a citation key because the title contains no usable words\nhint: specify a citation key with `--key`"
+        );
     }
 
     CitationKey::new(format!("{author_component}{year}{title_component}"))

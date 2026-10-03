@@ -1,7 +1,7 @@
 //! Testable boundaries around desktop applications.
 
 use crate::{model::CitationKey, repository::Repository};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use std::{ffi::OsString, path::Path};
 
 pub trait FileOpener {

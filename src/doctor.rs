@@ -7,7 +7,7 @@
 use crate::{
     metadata::Doi,
     model::{CitationKey, Reference},
-    repository::{sha256_file, Repository, SourceProofStatus},
+    repository::{Repository, SourceProofStatus, sha256_file},
     url_check::{UrlChecker, UrlStatus},
 };
 use anyhow::Result;
@@ -71,9 +71,9 @@ impl DoctorDiagnostic {
             Self::InvalidSourcePdf { key, reason } => {
                 format!("{key}: invalid source PDF: {reason}")
             }
-            Self::MissingPdfHash { key } => format!(
-                "{key}: source PDF has no integrity hash; run `ref hash` to create it"
-            ),
+            Self::MissingPdfHash { key } => {
+                format!("{key}: source PDF has no integrity hash; run `ref hash` to create it")
+            }
             Self::PdfHashMismatch { key } => format!(
                 "{key}: source PDF integrity mismatch; verify the PDF, then run `ref hash` to refresh its hash"
             ),

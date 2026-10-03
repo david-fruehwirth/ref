@@ -186,7 +186,7 @@ impl DoiMetadataClient {
                 return Err(LookupError::Retrieval {
                     doi: doi.clone(),
                     source: anyhow::anyhow!("resolver returned HTTP {status}"),
-                })
+                });
             }
         }
         if !(content_type.starts_with("application/json") || content_type.starts_with(CSL_JSON)) {
@@ -252,7 +252,11 @@ mod tests {
             let size = stream.read(&mut bytes).unwrap();
             let request = String::from_utf8_lossy(&bytes[..size]).into_owned();
             thread::sleep(delay);
-            let _ = write!(stream,"HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
             request
         });
         (format!("http://{address}/"), handle)
@@ -291,11 +295,12 @@ mod tests {
             .lookup(&"10.1234/example".parse().unwrap())
             .unwrap();
         assert_eq!(r.title, "Example");
-        assert!(h
-            .join()
-            .unwrap()
-            .to_ascii_lowercase()
-            .contains(&format!("accept: {CSL_JSON}").to_ascii_lowercase()));
+        assert!(
+            h.join()
+                .unwrap()
+                .to_ascii_lowercase()
+                .contains(&format!("accept: {CSL_JSON}").to_ascii_lowercase())
+        );
     }
     // Scenario: categorizes failures.
     // Requirement: REQ-061

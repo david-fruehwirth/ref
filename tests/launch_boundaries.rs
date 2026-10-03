@@ -1,8 +1,8 @@
 mod support;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use r#ref::{
-    launch::{edit_reference, open_reference, Editor, Environment, FileOpener},
+    launch::{Editor, Environment, FileOpener, edit_reference, open_reference},
     model::CitationKey,
     repository::Repository,
 };
@@ -68,10 +68,12 @@ fn open_requests_the_references_pdf_without_launching_a_desktop_app() {
         &*opener.0.borrow(),
         &[repo.pdf_directory().unwrap().join("paper2024.pdf")]
     );
-    assert!(open_reference(&repo, &key, &FailingOpener)
-        .unwrap_err()
-        .to_string()
-        .contains("failed to open"));
+    assert!(
+        open_reference(&repo, &key, &FailingOpener)
+            .unwrap_err()
+            .to_string()
+            .contains("failed to open")
+    );
 }
 
 // Scenario: open does not invoke opener for missing pdf or key.
@@ -138,13 +140,15 @@ fn edit_requires_configuration_and_preserves_invalid_user_edits() {
         key.as_str(),
         &support::sample("Edit", "Smith", Some(2024)),
     );
-    assert!(edit_reference(
-        &repo,
-        &key,
-        &MapEnvironment::default(),
-        &RecordingEditor::default()
-    )
-    .is_err());
+    assert!(
+        edit_reference(
+            &repo,
+            &key,
+            &MapEnvironment::default(),
+            &RecordingEditor::default()
+        )
+        .is_err()
+    );
     let environment = MapEnvironment(HashMap::from([("EDITOR".into(), OsString::from("editor"))]));
     assert!(edit_reference(&repo, &key, &environment, &InvalidatingEditor).is_err());
     assert_eq!(

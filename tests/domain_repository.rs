@@ -2,7 +2,7 @@ mod support;
 
 use r#ref::{
     doctor::{self, DiagnosticSeverity, DoctorDiagnostic},
-    model::{display_author, generated_key, CitationKey, Person, Reference, ReferenceType},
+    model::{CitationKey, Person, Reference, ReferenceType, display_author, generated_key},
     repository::Repository,
 };
 use std::fs;
@@ -115,16 +115,20 @@ fn generated_keys_normalize_author_year_and_title() {
 #[test]
 fn generated_keys_require_author_and_year_but_explicit_keys_remain_valid() {
     let mut reference = support::sample("Example Paper", "Smith", None);
-    assert!(generated_key(&reference)
-        .unwrap_err()
-        .to_string()
-        .contains("publication year"));
+    assert!(
+        generated_key(&reference)
+            .unwrap_err()
+            .to_string()
+            .contains("publication year")
+    );
     reference.year = Some(2024);
     reference.authors.clear();
-    assert!(generated_key(&reference)
-        .unwrap_err()
-        .to_string()
-        .contains("without an author"));
+    assert!(
+        generated_key(&reference)
+            .unwrap_err()
+            .to_string()
+            .contains("without an author")
+    );
     assert!(CitationKey::new("custom").is_ok());
 }
 
@@ -304,9 +308,10 @@ fn add_rename_and_remove_preserve_data_and_reject_unsafe_mutations() {
     let metadata = support::sample("Safe mutation", "Smith", Some(2024));
     repo.add(&old, &metadata, Some(&source)).unwrap();
     assert_eq!(fs::read(&source).unwrap(), b"%PDF deterministic");
-    assert!(repo
-        .add(&old, &support::sample("overwrite", "X", None), None)
-        .is_err());
+    assert!(
+        repo.add(&old, &support::sample("overwrite", "X", None), None)
+            .is_err()
+    );
     repo.rename(&old, &new).unwrap();
     assert!(!repo.contains(&old));
     let loaded = repo.load_reference(&new).unwrap();
@@ -327,12 +332,13 @@ fn failed_pdf_copy_leaves_no_final_reference() {
     let temp = tempfile::tempdir().unwrap();
     let repo = Repository::init(temp.path()).unwrap();
     let key = CitationKey::new("missing2024").unwrap();
-    assert!(repo
-        .add(
+    assert!(
+        repo.add(
             &key,
             &support::sample("Missing", "Smith", None),
             Some(&temp.path().join("absent.pdf"))
         )
-        .is_err());
+        .is_err()
+    );
     assert!(!repo.contains(&key));
 }

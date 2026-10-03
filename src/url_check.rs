@@ -1,5 +1,5 @@
 //! Shared, bounded URL validation and reachability checks.
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::{process::Command, time::Duration};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UrlStatus {
@@ -168,10 +168,12 @@ mod tests {
     #[test]
     fn success() {
         let u = server(vec!["HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"]);
-        assert!(HttpUrlChecker::new(Duration::from_secs(1))
-            .check(&u)
-            .unwrap()
-            .is_reachable());
+        assert!(
+            HttpUrlChecker::new(Duration::from_secs(1))
+                .check(&u)
+                .unwrap()
+                .is_reachable()
+        );
     }
     // Scenario: redirects are followed and reported with their final URL. Requirement: REQ-116.
     #[test]
@@ -224,10 +226,12 @@ mod tests {
             "HTTP/1.1 404 Nope\r\nConnection: close\r\n\r\n",
             "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n",
         ]);
-        assert!(HttpUrlChecker::new(Duration::from_secs(1))
-            .check(&u)
-            .unwrap()
-            .is_reachable());
+        assert!(
+            HttpUrlChecker::new(Duration::from_secs(1))
+                .check(&u)
+                .unwrap()
+                .is_reachable()
+        );
     }
 
     // Scenario: a GET-confirmed client error remains unreachable. Requirement: REQ-116.

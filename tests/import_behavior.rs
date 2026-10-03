@@ -2,7 +2,7 @@ mod support;
 
 use predicates::prelude::*;
 use r#ref::{
-    import::{import_bibliography, parse_bibliography, DiagnosticKind},
+    import::{DiagnosticKind, import_bibliography, parse_bibliography},
     model::{CitationKey, ReferenceType},
     repository::Repository,
 };
@@ -187,10 +187,12 @@ fn partial_failures_conflicts_and_unknown_types_are_structured() {
         result.warnings[0].message,
         "unsupported type `customa`; imported as `misc`"
     );
-    assert!(result
-        .failed
-        .iter()
-        .any(|d| d.kind == DiagnosticKind::InvalidCitationKey));
+    assert!(
+        result
+            .failed
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::InvalidCitationKey)
+    );
     assert_eq!(
         repo.load_reference(&CitationKey::new("existing").unwrap())
             .unwrap()

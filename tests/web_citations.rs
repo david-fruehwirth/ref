@@ -32,10 +32,12 @@ fn web_access_date_and_yaml_round_trip() {
     assert_eq!(reference.date.as_ref().unwrap().as_str(), "2024-10-03");
     assert_eq!(reference.urldate.as_ref().unwrap().as_str(), "2026-09-19");
     assert!(serde_yaml::from_str::<Reference>(&format!("{yaml}unknown: value\n")).is_err());
-    assert!(serde_yaml::from_str::<Reference>(
-        "type: online\ntitle: X\nauthors:\n - organization: Corp\n   family: Person\n"
-    )
-    .is_err());
+    assert!(
+        serde_yaml::from_str::<Reference>(
+            "type: online\ntitle: X\nauthors:\n - organization: Corp\n   family: Person\n"
+        )
+        .is_err()
+    );
 }
 
 // Scenario: Online fields, a corporate author, and a note are emitted deterministically.
@@ -81,7 +83,9 @@ fn imports_and_round_trips_web_metadata() {
     for kind in ["online", "electronic", "www"] {
         let temp = tempfile::tempdir().unwrap();
         let repo = Repository::init(temp.path()).unwrap();
-        let bib=format!("@{kind}{{web, author={{{{Example Group}} and Smith, Jane}}, title={{Example}}, date={{2024-10-03}}, year={{2024}}, url={{https://example.org}}, urldate={{2026-09-19}}}}");
+        let bib = format!(
+            "@{kind}{{web, author={{{{Example Group}} and Smith, Jane}}, title={{Example}}, date={{2024-10-03}}, year={{2024}}, url={{https://example.org}}, urldate={{2026-09-19}}}}"
+        );
         let result = import_bibliography(&repo, parse_bibliography(&bib).unwrap());
         assert!(result.is_complete());
         let stored = repo

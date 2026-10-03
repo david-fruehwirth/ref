@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 mod output;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input};
@@ -13,8 +13,8 @@ use r#ref::{
     launch::{self, Editor, Environment, FileOpener},
     metadata::{Doi, DoiMetadataClient},
     model::{
-        display_author, generated_key, validate_year, AccessDate, Author, CitationKey, Person,
-        Reference, ReferenceType,
+        AccessDate, Author, CitationKey, Person, Reference, ReferenceType, display_author,
+        generated_key, validate_year,
     },
     repository::{Repository, SourceProofStatus, StoredReference},
     url_check::{HttpUrlChecker, UrlChecker, UrlStatus},
@@ -940,11 +940,7 @@ fn list(repo: &Repository, args: ListArgs) -> Result<Execution> {
                 repo.source_proof_status(&reference.key),
                 SourceProofStatus::Present(_)
             );
-            if args.pdf {
-                valid
-            } else {
-                !valid
-            }
+            if args.pdf { valid } else { !valid }
         });
     }
     rs.sort_by(|a, b| match args.sort {

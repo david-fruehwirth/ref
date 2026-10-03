@@ -1,5 +1,5 @@
 use crate::model::{CitationKey, Reference};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -294,7 +294,9 @@ impl Repository {
             .validate()
             .with_context(|| format!("invalid metadata in {}", yaml.display()))?;
         if pdf_filename.is_none() && path.join("paper.pdf").exists() {
-            bail!("legacy per-reference PDF found for `{key}`; run `ref migrate-pdfs --dry-run`, then `ref migrate-pdfs`");
+            bail!(
+                "legacy per-reference PDF found for `{key}`; run `ref migrate-pdfs --dry-run`, then `ref migrate-pdfs`"
+            );
         }
         let (pdf_path, pdf_is_managed) = match pdf_filename.as_deref() {
             Some(name) => match self.resolve_pdf(name)? {
@@ -511,7 +513,9 @@ impl Repository {
             let text = fs::read_to_string(entry.path().join("ref.yaml"))?;
             let (_, _, filename, _) = parse_reference_yaml(&text)?;
             if filename.is_some() {
-                bail!("reference `{key}` has both legacy PDF storage and pdf_filename; resolve this conflict manually");
+                bail!(
+                    "reference `{key}` has both legacy PDF storage and pdf_filename; resolve this conflict manually"
+                );
             }
             changes.push(PdfMigration { key, from, to });
         }
@@ -789,12 +793,12 @@ mod tests {
             notes: None,
         };
         assert!(repo.add(&key, &metadata, None).is_err());
-        assert!(fs::read_dir(repo.references_dir())
-            .unwrap()
-            .all(|entry| !entry
+        assert!(fs::read_dir(repo.references_dir()).unwrap().all(|entry| {
+            !entry
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
-                .starts_with(".ref-add-")));
+                .starts_with(".ref-add-")
+        }));
     }
 }

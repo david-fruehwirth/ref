@@ -151,11 +151,12 @@ fn confirmation_can_cancel_or_remove_the_complete_reference_directory() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Cleanup cancelled"));
-    assert!(repo
-        .pdf_directory()
-        .unwrap()
-        .join("UnusedReference.pdf")
-        .is_file());
+    assert!(
+        repo.pdf_directory()
+            .unwrap()
+            .join("UnusedReference.pdf")
+            .is_file()
+    );
 
     support::command(temp.path())
         .arg("clean")

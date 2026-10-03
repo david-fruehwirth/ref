@@ -7,12 +7,12 @@
 
 use crate::{
     model::{
-        resolve_entry_type, AccessDate, Author, CitationKey, Organization, Person, PublicationDate,
-        Reference, ReferenceType, ResolvedReferenceType,
+        AccessDate, Author, CitationKey, Organization, Person, PublicationDate, Reference,
+        ReferenceType, ResolvedReferenceType, resolve_entry_type,
     },
     repository::Repository,
 };
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -467,7 +467,7 @@ impl<'a> Parser<'a> {
                 b'{' => depth += 1,
                 b'}' if depth > 0 => depth -= 1,
                 b'"' if depth == 0 => {
-                    return String::from_utf8(output).context("bibliography value is not UTF-8")
+                    return String::from_utf8(output).context("bibliography value is not UTF-8");
                 }
                 _ => output.push(byte),
             }

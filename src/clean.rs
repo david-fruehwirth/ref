@@ -4,7 +4,7 @@ use crate::{
     model::CitationKey,
     repository::{Repository, StoredReference},
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::{
     collections::BTreeSet,
     fs,
@@ -143,11 +143,7 @@ impl IgnoreRules {
             let matches = relative == rule
                 || relative.starts_with(&format!("{rule}/"))
                 || (!rule.contains('/') && path.components().any(|c| c.as_os_str() == rule));
-            if matches {
-                *rule_ignored
-            } else {
-                ignored
-            }
+            if matches { *rule_ignored } else { ignored }
         })
     }
 }

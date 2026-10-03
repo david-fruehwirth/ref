@@ -17,9 +17,11 @@ fn doi_server(status: &str, body: &str) -> (String, thread::JoinHandle<()>) {
         let (mut stream, _) = listener.accept().unwrap();
         let mut request = [0; 4096];
         let size = stream.read(&mut request).unwrap();
-        assert!(String::from_utf8_lossy(&request[..size])
-            .to_ascii_lowercase()
-            .contains("accept: application/vnd.citationstyles.csl+json"));
+        assert!(
+            String::from_utf8_lossy(&request[..size])
+                .to_ascii_lowercase()
+                .contains("accept: application/vnd.citationstyles.csl+json")
+        );
         write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/vnd.citationstyles.csl+json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
     });
     (url, handle)
@@ -41,14 +43,17 @@ fn add_from_doi_uses_normal_no_pdf_persistence_and_detects_duplicates() {
         .stdout(predicate::str::contains("Added Doe2024ExampleArticle"))
         .stderr(predicate::str::contains("Retrieving metadata"));
     handle.join().unwrap();
-    assert!(temp
-        .path()
-        .join(".ref/refs/Doe2024ExampleArticle/ref.yaml")
-        .is_file());
-    assert!(!temp
-        .path()
-        .join(".ref/source/Doe2024ExampleArticle.pdf")
-        .exists());
+    assert!(
+        temp.path()
+            .join(".ref/refs/Doe2024ExampleArticle/ref.yaml")
+            .is_file()
+    );
+    assert!(
+        !temp
+            .path()
+            .join(".ref/source/Doe2024ExampleArticle.pdf")
+            .exists()
+    );
     let yaml =
         fs::read_to_string(temp.path().join(".ref/refs/Doe2024ExampleArticle/ref.yaml")).unwrap();
     assert!(yaml.contains("doi: 10.1234/example"));

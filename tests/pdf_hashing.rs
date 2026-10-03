@@ -35,11 +35,12 @@ fn configuration_default_and_validation() {
         "version: 1\npdf_hashing: perhaps\n",
     )
     .unwrap();
-    assert!(repo
-        .pdf_hashing()
-        .unwrap_err()
-        .to_string()
-        .contains("invalid"));
+    assert!(
+        repo.pdf_hashing()
+            .unwrap_err()
+            .to_string()
+            .contains("invalid")
+    );
 }
 
 // Scenario: adding a PDF stores its correct lowercase SHA-256 digest.
@@ -73,15 +74,17 @@ fn disabled_add_and_doctor_skip_hashing() {
     .unwrap();
     let text = fs::read_to_string(repo.reference_path(&key).join("ref.yaml")).unwrap();
     assert!(!text.contains("pdf_sha256"));
-    assert!(doctor::inspect(&repo)
-        .unwrap()
-        .diagnostics
-        .iter()
-        .all(|d| !matches!(
-            d,
-            doctor::DoctorDiagnostic::MissingPdfHash { .. }
-                | doctor::DoctorDiagnostic::PdfHashMismatch { .. }
-        )));
+    assert!(
+        doctor::inspect(&repo)
+            .unwrap()
+            .diagnostics
+            .iter()
+            .all(|d| !matches!(
+                d,
+                doctor::DoctorDiagnostic::MissingPdfHash { .. }
+                    | doctor::DoctorDiagnostic::PdfHashMismatch { .. }
+            ))
+    );
 }
 
 // Scenario: doctor accepts a matching hash and detects a changed PDF as an error.
@@ -89,24 +92,28 @@ fn disabled_add_and_doctor_skip_hashing() {
 #[test]
 fn doctor_verifies_matching_and_mismatching_hashes() {
     let (_temp, repo, key) = repo_with_pdf();
-    assert!(doctor::inspect(&repo)
-        .unwrap()
-        .diagnostics
-        .iter()
-        .all(|d| !matches!(
-            d,
-            doctor::DoctorDiagnostic::PdfHashMismatch { .. }
-                | doctor::DoctorDiagnostic::MissingPdfHash { .. }
-        )));
+    assert!(
+        doctor::inspect(&repo)
+            .unwrap()
+            .diagnostics
+            .iter()
+            .all(|d| !matches!(
+                d,
+                doctor::DoctorDiagnostic::PdfHashMismatch { .. }
+                    | doctor::DoctorDiagnostic::MissingPdfHash { .. }
+            ))
+    );
     fs::write(repo.source_pdf_path(&key).unwrap(), b"changed").unwrap();
-    assert!(doctor::inspect(&repo)
-        .unwrap()
-        .diagnostics
-        .iter()
-        .any(
-            |d| matches!(d, doctor::DoctorDiagnostic::PdfHashMismatch { .. })
-                && d.severity() == doctor::DiagnosticSeverity::Error
-        ));
+    assert!(
+        doctor::inspect(&repo)
+            .unwrap()
+            .diagnostics
+            .iter()
+            .any(
+                |d| matches!(d, doctor::DoctorDiagnostic::PdfHashMismatch { .. })
+                    && d.severity() == doctor::DiagnosticSeverity::Error
+            )
+    );
 }
 
 // Scenario: doctor gives an actionable warning for backward-compatible unhashed PDF metadata.
