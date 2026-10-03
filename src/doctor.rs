@@ -184,23 +184,21 @@ pub fn inspect_with_options(
                     continue;
                 }
             };
-        if hashing {
-            if let SourceProofStatus::Present(path) = repo.source_proof_status(&key) {
-                match stored_hash {
-                    Some(expected) => match sha256_file(&path) {
-                        Ok(actual) if actual != expected => report
-                            .diagnostics
-                            .push(DoctorDiagnostic::PdfHashMismatch { key: key.clone() }),
-                        Ok(_) => {}
-                        Err(error) => report.diagnostics.push(DoctorDiagnostic::InvalidSourcePdf {
-                            key: key.clone(),
-                            reason: error.to_string(),
-                        }),
-                    },
-                    None => report
+        if hashing && let SourceProofStatus::Present(path) = repo.source_proof_status(&key) {
+            match stored_hash {
+                Some(expected) => match sha256_file(&path) {
+                    Ok(actual) if actual != expected => report
                         .diagnostics
-                        .push(DoctorDiagnostic::MissingPdfHash { key: key.clone() }),
-                }
+                        .push(DoctorDiagnostic::PdfHashMismatch { key: key.clone() }),
+                    Ok(_) => {}
+                    Err(error) => report.diagnostics.push(DoctorDiagnostic::InvalidSourcePdf {
+                        key: key.clone(),
+                        reason: error.to_string(),
+                    }),
+                },
+                None => report
+                    .diagnostics
+                    .push(DoctorDiagnostic::MissingPdfHash { key: key.clone() }),
             }
         }
         report.metadata_parsed += 1;
@@ -228,15 +226,13 @@ pub fn inspect_with_options(
                     .push(DoctorDiagnostic::MalformedDoi { key: key.clone() }),
             }
         }
-        if check_urls {
-            if let Some(url) = metadata.url.as_deref() {
-                let status = checker
-                    .check(url)
-                    .unwrap_or_else(|error| UrlStatus::ConnectionFailure(error.to_string()));
-                report
-                    .diagnostics
-                    .push(DoctorDiagnostic::UrlStatus { key, status });
-            }
+        if check_urls && let Some(url) = metadata.url.as_deref() {
+            let status = checker
+                .check(url)
+                .unwrap_or_else(|error| UrlStatus::ConnectionFailure(error.to_string()));
+            report
+                .diagnostics
+                .push(DoctorDiagnostic::UrlStatus { key, status });
         }
     }
     for keys in dois.into_values().filter(|keys| keys.len() > 1) {

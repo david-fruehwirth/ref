@@ -470,11 +470,10 @@ impl Repository {
             .pdf_is_managed
             .then_some(reference.pdf_path)
             .flatten()
+            && pdf.exists()
         {
-            if pdf.exists() {
-                fs::remove_file(&pdf)
-                    .with_context(|| format!("failed to remove source PDF {}", pdf.display()))?;
-            }
+            fs::remove_file(&pdf)
+                .with_context(|| format!("failed to remove source PDF {}", pdf.display()))?;
         }
         fs::remove_dir_all(self.reference_path(key))?;
         Ok(())
